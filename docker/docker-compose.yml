@@ -78,9 +78,19 @@ services:
       # Chunks already render in parallel inside one job, so celery concurrency
       # here is 2, not 8 -- otherwise the two levels of parallelism multiply.
       REELFORGE_RENDER__WORKERS: "0"
-    deploy:
-      resources:
-        limits: {cpus: "8"}
+    # No cpu limit here on purpose. A hardcoded `limits: {cpus: "8"}` is not a
+    # cap on a machine that has fewer than eight -- the daemon refuses the
+    # service outright ("range of CPUs is from 0.01 to 1.00"), so the stack
+    # would not start at all on a laptop, which is most of them. What the
+    # renderer gets is whatever Docker was given, and WORKERS: 0 sizes itself
+    # to that. To cap it deliberately on a big shared box, add a
+    # docker-compose.override.yml:
+    #
+    #   services:
+    #     renderer:
+    #       deploy:
+    #         resources:
+    #           limits: {cpus: "8"}
 
   ollama:
     profiles: ["local-llm"]
