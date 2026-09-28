@@ -296,6 +296,57 @@ def test_two_failures_in_a_row_pause_the_queue_with_a_reason(store, monkeypatch)
     assert queue_store.read().consecutive_failures == 0
 
 
+def test_an_approved_reel_resumes_ahead_of_the_line_it_never_left(store, monkeypatch):
+    """Approving a gate must put the reel back at the FRONT of the queue.
+
+    It already had its turn and stopped only because it was told to. Sending it
+    to the back means a reel queued while you were reading the script runs
+    first and the approved one waits all over again -- and with gates on both
+    `content` and `storyboard` that happens twice per reel.
+
+    Driven through the endpoint on purpose: `queue_store.enqueue(front=True)`
+    has always worked, and asserting on it proves nothing about whether the
+    approve route actually asks for it.
+    """
+    from fastapi.testclient import TestClient
+
+    from app import queue_store
+    from app.main import app as fastapi_app
+    from app.models.job import Stage, Status
+
+    client = TestClient(fastapi_app)
+
+    approved = make(store, "approved")
+    later = make(store, "later")
+
+    # the approved reel ran, parked at its gate, and the queue moved on
+    queue_store.enqueue(store, approved.id)
+    queue_store.claim_next(store)
+    queue_store.release(store, approved.id, reason="review:content")
+    approved.mark(Stage.CONTENT, Status.REVIEW)
+    store.save(approved)
+    queue_store.enqueue(store, later.id)
+
+    response = client.post(f"/api/jobs/{approved.id}/stages/content/approve")
+    assert response.status_code == 200, response.text
+
+    claimed = queue_store.claim_next(store)
+    assert claimed is not None and claimed.id == approved.id, (
+        "the approved reel went to the back of the queue behind a later arrival"
+    )
+
+
+def test_the_approve_endpoint_actually_asks_for_the_front(store):
+    """The behaviour above is one keyword argument away from silently
+    regressing, and the queue ordering test cannot see the endpoint."""
+    import inspect
+
+    from app.api import routes_jobs
+
+    source = inspect.getsource(routes_jobs.approve)
+    assert "front=True" in source, "approve no longer requeues at the front"
+
+
 def test_a_job_can_only_hold_one_place_in_the_queue(store):
     from app import queue_store
 

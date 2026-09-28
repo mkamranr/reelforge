@@ -261,12 +261,15 @@
       section("Approval", null,
         field("Pause for review",
           el("select", { class: "select", name: "gates" },
-            [["", "Use the saved default"], ["none", "Run straight through"],
+            [["", "Use the saved default"],
+             ["none", "Run unattended — finish without stopping"],
              ["all", "Pause after every stage"]].map(function (pair) {
               return el("option", { value: pair[0] }, pair[1]);
             })),
-          "A job that pauses at content and storyboard will stop twice before it " +
-          "renders anything.")),
+          "The saved default pauses at content and storyboard, so the reel stops "
+          + "twice before it renders anything and waits for you. Queue several "
+          + "that way and you come back to all of them parked at the first gate — "
+          + "pick “run unattended” for a batch you want finished.")),
 
       el("div", { class: "cluster" },
         el("button", { type: "submit", class: "btn btn--primary" },

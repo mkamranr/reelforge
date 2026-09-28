@@ -115,6 +115,49 @@ VIDEO_ARGS = [
 ]
 AUDIO_ARGS = ["-c:a", "aac", "-b:a", "192k", "-ar", "48000", "-ac", "2"]
 
+#: Deliverable sizes, all 9:16. 1080x1920 is what the pipeline renders and what
+#: `verify` checks; the other two are upscales of that same file, offered
+#: because some platforms treat a larger upload more generously on the bitrate
+#: ladder. They add no detail -- nothing here invents pixels -- so the master
+#: stays the master.
+RESOLUTIONS: dict[str, tuple[int, int]] = {
+    "1080p": (1080, 1920),
+    "2k": (1440, 2560),
+    "4k": (2160, 3840),
+}
+
+
+def h264_level(height: int) -> str:
+    """The lowest level that legally carries this frame size at 30 fps.
+
+    4.1 tops out at 1080p; a 4K stream tagged 4.1 is out of spec and players
+    are entitled to refuse it. 5.1 covers everything up to 4096x2176@30, which
+    is both of the upscales.
+    """
+    return "4.1" if height <= 1920 else "5.1"
+
+
+def upscale_cmd(ffmpeg: str, source: Path, out: Path, width: int, height: int) -> list[str]:
+    """Scale an encoded reel up, re-encoding video and copying audio.
+
+    Lanczos because it is the sharpest of ffmpeg's general resamplers and this
+    is the one job it is for. The audio is stream-copied deliberately: it was
+    normalised to -14 LUFS / -1.5 dBTP and verified there, and a second AAC
+    pass would move it for no gain.
+    """
+    video_args = [a for a in VIDEO_ARGS]
+    video_args[video_args.index("-level") + 1] = h264_level(height)
+    # `slow` is right for the master, where the encoder is deciding how to
+    # spend bits on real detail. Here the input is an already-compressed 1080
+    # file resampled up: the result is smooth, cheap to encode, and carries no
+    # detail a slower search could find. Measured on a 40 s reel at 4K: slow
+    # did not finish in two minutes, veryfast took 72 s, and the two are
+    # indistinguishable on resampled frames.
+    video_args[video_args.index("-preset") + 1] = "veryfast"
+    return [ffmpeg, "-y", "-v", "error", "-i", str(source),
+            "-vf", f"scale={width}:{height}:flags=lanczos",
+            *video_args, "-c:a", "copy", "-movflags", "+faststart", str(out)]
+
 
 def raw_input_args(width: int, height: int, fps: int) -> list[str]:
     return ["-f", "rawvideo", "-pix_fmt", "rgba", "-s", f"{width}x{height}",

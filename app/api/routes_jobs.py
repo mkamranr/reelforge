@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import json
+import subprocess
 import uuid
 from pathlib import Path
 
@@ -268,7 +269,11 @@ def approve(job_id: str, stage_value: str, advance: bool = True) -> dict:
     job.mark(stage, Status.DONE)
     job.note(f"{stage.value} approved")
     store().save(job)
-    dispatch = submit_pipeline(job_id) if advance else None
+    # `front` is the whole point of approving: the reel already had its turn
+    # and only stopped because it was told to. Sending it to the back means a
+    # reel queued while you were reading the script now runs first, and the
+    # one you just approved waits again. `retry` has always done this.
+    dispatch = submit_pipeline(job_id, front=True) if advance else None
     return {"approved": stage.value, "executor": dispatch}
 
 
@@ -423,6 +428,63 @@ async def upload_markdown(job_id: str, file: UploadFile) -> dict:
     job.note(f"markdown uploaded: {target.name}")
     store().save(job)
     return {"ok": True, "name": target.name}
+
+
+@router.get("/{job_id}/upscales")
+def list_upscales(job_id: str) -> dict:
+    """What sizes exist, and what could be made."""
+    from app.render.encode import RESOLUTIONS
+
+    job = _load(job_id)
+    paths = store().paths(job)
+    out = []
+    for name, (width, height) in RESOLUTIONS.items():
+        target = paths.reel_mp4 if name == "1080p" else paths.out / f"{job.slug}-reel-{name}.mp4"
+        exists = target.exists()
+        out.append({"resolution": name, "width": width, "height": height,
+                    "native": name == "1080p", "exists": exists,
+                    "bytes": target.stat().st_size if exists else None,
+                    "path": paths.rel(target) if exists else None})
+    return {"master": paths.rel(paths.reel_mp4) if paths.reel_mp4.exists() else None,
+            "sizes": out}
+
+
+@router.post("/{job_id}/upscale")
+def upscale(job_id: str, resolution: str = Body(..., embed=True)) -> dict:
+    """Scale the rendered reel up to 2K or 4K, beside the verified master.
+
+    The 1080x1920 file stays the deliverable `verify` checked and the one both
+    platforms want; this is an extra. Nothing here invents detail -- it is a
+    Lanczos resample of the same frames -- so it is offered rather than
+    default.
+    """
+    from app.render.encode import RESOLUTIONS, upscale_cmd
+    from app.render.workspace import ffmpeg_bin
+
+    key = (resolution or "").strip().lower()
+    if key not in RESOLUTIONS:
+        raise HTTPException(422, f"unknown resolution {resolution!r}; "
+                                 f"expected one of {', '.join(RESOLUTIONS)}")
+    job = _load(job_id)
+    paths = store().paths(job)
+    if not paths.reel_mp4.exists():
+        raise HTTPException(409, "there is no rendered reel yet to scale up")
+    if key == "1080p":
+        return {"resolution": key, "path": paths.rel(paths.reel_mp4),
+                "bytes": paths.reel_mp4.stat().st_size, "native": True}
+
+    width, height = RESOLUTIONS[key]
+    paths.out.mkdir(parents=True, exist_ok=True)
+    target = paths.out / f"{job.slug}-reel-{key}.mp4"
+    cmd = upscale_cmd(ffmpeg_bin(), paths.reel_mp4, target, width, height)
+    proc = subprocess.run(cmd, capture_output=True, text=True)
+    if proc.returncode != 0:
+        raise HTTPException(500, "upscale failed: " + (proc.stderr or "").strip()[-400:])
+
+    job.note(f"upscaled to {key} ({width}x{height})")
+    store().save(job)
+    return {"resolution": key, "width": width, "height": height,
+            "path": paths.rel(target), "bytes": target.stat().st_size, "native": False}
 
 
 # ------------------------------------------------------------- artifacts --

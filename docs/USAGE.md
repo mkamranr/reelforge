@@ -78,6 +78,68 @@ so an approved script cannot leave a video rendered from the previous one.
 Presets for all-manual and all-auto are in Settings; a per-job setting overrides
 the saved default.
 
+### Leaving a queue to run unattended
+
+Generation is entirely server-side. The browser only watches: the progress
+stream is one-way, nothing in the app is tied to a request, and closing the
+tab, losing the network or shutting the laptop lid cannot affect a job that is
+already running.
+
+What *can* stop one:
+
+- **The gates themselves.** This is the one that surprises people. A gated reel
+  parks at `content` and **releases its place in the queue** so the next reel
+  starts. Queue five reels on the default settings and you come back to five
+  reels all waiting at the first gate, not five finished videos. For a batch
+  you want finished, pick **Run unattended** on the New reel form, or set the
+  all-auto preset in Settings.
+- **The server process.** Without Redis the scheduler is a thread inside
+  `uvicorn`, so that process *is* the worker: closing the terminal or letting
+  the machine sleep stops everything. The Docker path runs the stages in
+  separate `worker` and `renderer` containers, which is what survives.
+- **`--reload`.** The development command restarts on any file save, and that
+  kills the stage in flight. Do not use it while a queue is draining.
+- **A restart costs exactly one reel.** The stage that was running is marked
+  failed with an "Interrupted" note and that job leaves the queue — deliberately,
+  because putting it back would send it straight into the stage that just died.
+  Everything still queued resumes on its own.
+- **Two consecutive failures pause the whole queue.** That pattern usually means
+  a broken model server rather than two bad reels, so nothing further runs until
+  you press Resume.
+
+---
+
+## Deliverable size: 1080p, 2K and 4K
+
+The pipeline renders and verifies one file, **1080x1920**, which is what
+Instagram Reels, YouTube Shorts and Facebook Reels all want. That file is the
+master and the 18 platform checks are about it.
+
+On the job page, the **render** pane also offers 2K (1440x2560) and 4K
+(2160x3840). These are Lanczos upscales of the finished reel, written beside it
+as `out/<slug>-reel-2k.mp4` and `-4k.mp4`:
+
+```bash
+curl -X POST localhost:8020/api/jobs/<id>/upscale \
+     -H 'Content-Type: application/json' -d '{"resolution":"4k"}'
+curl localhost:8020/api/jobs/<id>/upscales          # what exists, what could
+```
+
+Two things worth knowing before you use them. **They add no detail** — nothing
+here invents pixels, so a 4K upload is the same picture in a bigger frame; the
+reason to want one is that some platforms give a larger upload a more generous
+bitrate ladder. And **the audio is stream-copied, never re-encoded**, because it
+was normalised to -14 LUFS / -1.5 dBTP and verified there.
+
+The upscale re-encodes video at `veryfast` rather than the master's `slow`:
+resampled frames carry no detail a longer search could find, and on a 40-second
+reel the difference is 70 seconds versus not finishing in two minutes. Expect
+roughly 30 s for 2K and 70 s for 4K. They are tagged H.264 level 5.1, not the
+master's 4.1, which tops out at 1080p.
+
+An upscale made after `package` has already run is not in `bundle.zip`; re-run
+`package` if you want it there.
+
 ---
 
 ## The CLI
@@ -167,6 +229,8 @@ Interactive docs at **http://localhost:8020/docs**.
 | `GET` `/api/jobs/{id}/alignment` · `PUT` `/phrases` | Word timing, phrase split |
 | `POST` `/api/jobs/{id}/audio` | Upload narration |
 | `POST` `PATCH` `DELETE` `/api/jobs/{id}/images…` | Screenshots and crops |
+| `GET` `/api/jobs/{id}/upscales` | Which sizes exist, and which could be made |
+| `POST` `/api/jobs/{id}/upscale` | Scale the reel to `2k` or `4k` beside the master |
 | `GET` `/api/jobs/{id}/artifacts/{path}` | Any file in the job directory |
 
 ### Queue

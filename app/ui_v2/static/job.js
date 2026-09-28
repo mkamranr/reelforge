@@ -206,10 +206,68 @@
       .catch(function () { return metaCard(stage); });
   };
 
+  /* The reel, and the sizes it can be delivered at.
+   *
+   * 1080x1920 is what the pipeline renders and what `verify` checks, so it is
+   * always the master. 2K and 4K are Lanczos upscales of that same file,
+   * written beside it -- they add no detail, which is why they are a button
+   * rather than a default. The encode is slow enough to be worth a busy state:
+   * measured at roughly 30 s for 2K and 70 s for 4K on a 40-second reel.
+   */
   panes.render = function (stage) {
-    return el("div", { class: "card" },
-      el("video", { src: artifactUrl(stage.artifacts.video), controls: "controls",
-                    class: "shot", preload: "metadata" }));
+    var url = "/api/jobs/" + encodeURIComponent(state.id) + "/upscale";
+    return RF.api.get(url + "s").then(function (info) {
+      var sizes = info.sizes || [];
+      var select = el("select", { class: "select" }, sizes.map(function (size) {
+        var label = size.resolution === "1080p"
+          ? "1080p — " + size.width + "x" + size.height + " (native)"
+          : size.resolution.toUpperCase() + " — " + size.width + "x" + size.height
+            + (size.exists ? " ✓" : "");
+        return el("option", { value: size.resolution }, label);
+      }));
+
+      var button = el("button", { class: "btn btn--sm", type: "button" }, "Make");
+      button.addEventListener("click", function () {
+        var choice = select.value;
+        if (choice === "1080p") {
+          RF.dom.toast("1080p is the rendered master — it already exists", { kind: "ok" });
+          return;
+        }
+        button.dataset.busy = "1";
+        RF.dom.toast("upscaling to " + choice.toUpperCase() + " — this takes a minute",
+                     { kind: "ok", timeout: 8000 });
+        RF.api.post(url, { resolution: choice })
+          .then(function (made) {
+            RF.dom.toast(choice.toUpperCase() + " written: " + fmt.bytes(made.bytes),
+                         { kind: "ok", timeout: 9000 });
+            renderPane();
+          })
+          .catch(function (error) {
+            RF.dom.toast(error.message, { kind: "error", timeout: 12000 });
+          })
+          .then(function () { delete button.dataset.busy; });
+      });
+
+      var made = sizes.filter(function (s) { return s.exists; });
+      return el("div", { class: "stack", "data-gap": "3" },
+        el("div", { class: "card" },
+          el("video", { src: artifactUrl(stage.artifacts.video), controls: "controls",
+                        class: "shot", preload: "metadata" })),
+        el("div", { class: "card" },
+          el("div", { class: "card__title" }, "Deliverable size"),
+          el("div", { class: "field__hint" },
+             "The reel renders at 1080x1920, which is what the platform checks "
+             + "passed. Larger sizes are upscales of that file — no extra detail, "
+             + "but some platforms give a bigger upload a better bitrate."),
+          el("div", { class: "cluster", "data-gap": "2" }, select, button),
+          el("div", { class: "cluster", "data-gap": "2" }, made.map(function (size) {
+            var file = String(size.path).split(/[\\/]/).pop();
+            return el("a", { class: "btn btn--sm", href: artifactUrl(size.path),
+                             download: file },
+                      RF.icon("download", { size: 14 }),
+                      size.resolution.toUpperCase() + " · " + fmt.bytes(size.bytes));
+          }))));
+    });
   };
 
   panes.verify = function (stage) {
