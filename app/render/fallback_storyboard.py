@@ -776,6 +776,15 @@ def sl_quote(ov, d, t, t0, o, i):
 
 
 def sl_image(ov, d, t, t0, o, i):
+    """A picture the pipeline did not draw: an uploaded screenshot, or a
+    generated still.
+
+    It is pasted at the full frame width, which puts it under the platform's
+    action-button column, so it takes the same side scrims the repo scroll
+    takes. A photograph often survives without them; a screenshot never does
+    -- it is bright, rectangular, high-contrast interface right out to its
+    border, which is exactly what the safe-area check counts.
+    """
     name = o.get("file")
     if not name:
         return
@@ -797,6 +806,7 @@ def sl_image(ov, d, t, t0, o, i):
         return
     S.rise(ov, lambda L, D, im=img.crop((0, 0, W, hgt)), yy=y:
            L.paste(im, (0, yy)), (0, y, W, y + hgt), k)
+    _side_scrims(ov, TH.field(i))
     if o.get("label"):
         S.chip(ov, d, (CX, y - 52), o["label"], t, t0 + 0.10, TH, i, size=34)
 

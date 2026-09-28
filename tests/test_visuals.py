@@ -481,6 +481,69 @@ def test_a_long_narration_makes_a_long_reel_instead_of_failing(sample, tmp_path,
     config.get_config.cache_clear()
 
 
+def test_a_full_bleed_screenshot_keeps_slabs_side_bands_clean(sample, tmp_path):
+    """The reelforge reel's own failure: `slab-image` pasted an uploaded
+    screenshot at the full frame width with no edge treatment, and the
+    safe-area check measured 45.8% of the left band as legible content
+    against a 0.4% ceiling.
+
+    Slab's other two full-bleed drawers were already covered -- `sl_clip`
+    multiplies by `_side_mask`, `sl_scroll` lays `_side_scrims` -- and
+    `sl_image` had neither. A photograph often survives that; a screenshot,
+    which is bright rectangular interface out to its border, never does.
+
+    Measured directly rather than through the smoke rungs: the family test
+    compares rung *names* against a baseline that already carries `safe-area`,
+    so it cannot see a new failure of the same kind.
+    """
+    pytest.importorskip("PIL")
+    import numpy as np
+    from PIL import Image
+
+    from tests.test_screens import _require_fonts
+
+    _require_fonts()
+    from app.render.fallback_storyboard import build_source
+    from app.stages.storyboard import run_smoke
+    from app.validate.smoke import BAND_TRIP, LEGIBLE_CONTRAST
+
+    total = 20.0
+    workspace, segments = _workspace_for(tmp_path, sample, total)
+
+    # a screenshot's worst case: a near-white page with dark text running all
+    # the way through both margins, which is what the real upload was
+    (workspace / "images").mkdir(parents=True, exist_ok=True)
+    shot = Image.new("RGB", (1080, 1500), (250, 250, 248))
+    pixels = np.asarray(shot).copy()
+    for y in range(40, 1500, 60):
+        pixels[y:y + 18, 20:1060] = (22, 22, 26)
+    Image.fromarray(pixels).save(workspace / "images" / "shot.png")
+
+    images = [{"file": "shot.png", "fit": "full", "role": "other", "position": "centre",
+               "eyebrow": "THE REPO", "caption": "", "width": 1080, "height": 1500}]
+    source = build_source(sample, total=total, audio_rel=f"{sample.slug}.mp3",
+                          phrases_rel=f"phrases/{sample.slug}.txt", segments=segments,
+                          images=images, family="slab")
+    (workspace / "storyboards" / f"{sample.slug}.py").write_text(source, encoding="utf-8")
+    result = run_smoke(workspace, sample.slug, tmp_path / "frames", expected_duration=total)
+    assert "crash" not in {p["rung"] for p in result.get("problems", [])}, result.get("problems")
+
+    # every frame drawn over the screenshot must keep both side bands clean
+    frames = sorted(tmp_path.glob("frames/*.png")) or sorted(tmp_path.glob("frames/**/*.png"))
+    assert frames, "the smoke run produced no frames to measure"
+    worst = 0.0
+    for path in frames:
+        rgb = np.asarray(Image.open(path).convert("RGB"), dtype=float)
+        luma = 0.2126 * rgb[:, :, 0] + 0.7152 * rgb[:, :, 1] + 0.0722 * rgb[:, :, 2]
+        for band in (luma[150:1600, :84], luma[150:1600, -84:]):
+            share = float((np.abs(band - np.median(band)) > LEGIBLE_CONTRAST).mean())
+            worst = max(worst, share)
+    assert worst <= BAND_TRIP, (
+        f"a full-bleed screenshot put {worst:.1%} of a side band under the "
+        f"platform UI; the ceiling is {BAND_TRIP:.1%}"
+    )
+
+
 def test_a_long_url_never_crosses_the_end_cards_right_edge(sample, tmp_path):
     """The minimax-music3 failure: L.endcard draws the URL at m(38) from
     x 232 with no fitting, and a Hugging Face URL walked through x 996."""
