@@ -51,7 +51,7 @@ services:
     # Loopback only. The settings API accepts API keys, and without
     # REELFORGE_ADMIN_TOKEN set it trusts anything that can reach it. Publish
     # more widely only together with that token.
-    ports: ["127.0.0.1:8000:8000"]
+    ports: ["127.0.0.1:8020:8020"]
 
   # Short stages: ingest, content, audio, align, package. Kept off the render
   # queue so an eight-minute encode never blocks a thirty-second LLM call.
@@ -92,7 +92,10 @@ services:
   tts:
     profiles: ["local-tts"]
     image: ghcr.io/remsky/kokoro-fastapi-cpu:latest
-    ports: ["8080:8880"]
+    # Published on its own port rather than 8080, which is a busy one on a
+    # development machine and collided in practice. Inside the network the
+    # app reaches it at http://tts:8880.
+    ports: ["8880:8880"]
     restart: unless-stopped
 
 volumes:

@@ -311,6 +311,120 @@ def test_the_art_director_feeds_prompts_and_headings_and_falls_back_cleanly(samp
     assert fallback and fallback[0].heading == fallback[0].scene_title
 
 
+def test_every_asset_carries_a_search_term_whether_or_not_the_art_director_ran(sample):
+    """A search-based adapter reads `query`, never `prompt`. The art director
+    writes the good one; the rule-based squeeze covers the case where that
+    call is off or failed, and a picture with no term at all is a hole in the
+    reel."""
+    from app.providers.llm.fake import FakeProvider
+    from app.stages import visuals as V
+
+    body = V.body_scenes(sample)
+    scenes = [{"scene_index": s.index,
+               "still": "a brass key on dark slate under one hard beam of light",
+               "clip": "slow push-in on a brass key turning in a lock",
+               "heading": "One Clean Call",
+               "query": "Brass Key Slate."} for s in body]
+    llm = FakeProvider({"by_schema": {"ArtDirection": {"scenes": scenes}}})
+    directions = V.art_direct(sample, [s.index for s in body], llm)
+    assert all(d["query"] == "brass key slate" for d in directions.values())
+
+    assets = V.plan(sample, job_id="j", stills=2, clips=1, style="S", still_fit="full",
+                    directions=directions)
+    assert assets and all(a.query == "brass key slate" for a in assets)
+
+    # no art direction at all: still a term, just a blunter one
+    bare = V.plan(sample, job_id="j", stills=2, clips=1, style="S", still_fit="full")
+    assert bare and all(a.query and len(a.query.split()) <= 3 for a in bare)
+    # the style suffix and the palette words never reach the search engine
+    assert all("cinematic" not in a.query and "vertical" not in a.query for a in bare)
+
+
+def test_credits_name_every_stock_picture_once_and_ignore_generated_ones():
+    from app.stages import visuals as V
+
+    def meta(pid, name):
+        return {"source": "pexels", "id": pid, "photographer": name,
+                "photographer_url": f"https://www.pexels.com/@{pid}",
+                "url": f"https://www.pexels.com/photo/{pid}/"}
+
+    assets = [
+        V.Asset(kind="still", index=1, scene_index=2, scene_title="t", prompt="p", seed=1,
+                ok=True, meta=meta(10, "Kelly L")),
+        V.Asset(kind="clip", index=1, scene_index=3, scene_title="t", prompt="p", seed=2,
+                ok=True, meta=meta(20, "Rodolfo Q")),
+        # the same photograph twice earns one credit
+        V.Asset(kind="still", index=2, scene_index=4, scene_title="t", prompt="p", seed=3,
+                ok=True, meta=meta(10, "Kelly L")),
+        # a failed asset never shipped, so it is not credited
+        V.Asset(kind="still", index=3, scene_index=5, scene_title="t", prompt="p", seed=4,
+                ok=False, meta=meta(30, "Nobody")),
+        # a generated asset has nobody to credit
+        V.Asset(kind="clip", index=2, scene_index=6, scene_title="t", prompt="p", seed=5,
+                ok=True, meta={"prompt_id": "abc"}),
+    ]
+    credits = V.credits_from(assets, meta(99, "Cover Person"))
+    assert [c["asset"] for c in credits] == ["cover backdrop", "still 1", "clip 1"]
+    assert V.credit_line(credits) == "Footage: Pexels (Cover Person, Kelly L, Rodolfo Q)"
+
+    # a reel with no stock footage gets no credits and no line
+    assert V.credits_from([assets[-1]], {}) == []
+    assert V.credit_line([]) == ""
+
+
+def test_the_credit_reaches_the_copy_that_actually_ships(sample):
+    """Pexels asks for a link back and a credit to the photographer. The
+    content stage writes captions.txt and metadata/ before the visuals stage
+    knows what it will find, so the package stage re-emits both."""
+    from types import SimpleNamespace
+
+    from app.render import documents
+
+    credits = [{"asset": "clip 1", "source": "pexels", "photographer": "Kelly L",
+                "photographer_url": "https://www.pexels.com/@kelly",
+                "url": "https://www.pexels.com/video/12345/"}]
+    credit = "Footage: Pexels (Kelly L)"
+
+    def post(name):
+        return SimpleNamespace(
+            platform=name, title=f"{name} title",
+            alt_text="a still of a brass key", pinned_comment="", first_comment="",
+            render_text=lambda: f"a {name} caption\n#tags",
+            render_description=lambda: f"a {name} description",
+            model_dump=lambda mode=None: {"platform": name})
+
+    instagram, youtube = post("instagram"), post("youtube")
+    facebook, linkedin = post("facebook"), post("linkedin")
+    platforms = SimpleNamespace(instagram=instagram, youtube=youtube, facebook=facebook,
+                                linkedin=linkedin,
+                                all=lambda: [instagram, youtube, facebook, linkedin])
+
+    block = documents.caption_block(sample, platforms, credit=credit)
+    assert credit in block
+    assert credit not in documents.caption_block(sample, platforms)
+
+    files = documents.metadata_files(sample, platforms, credit=credit)
+    assert files["instagram.txt"].rstrip().endswith(credit)
+    assert '"credit"' in files["instagram.json"]
+    assert credit not in documents.metadata_files(sample, platforms)["instagram.txt"]
+
+    # and the notes carry the link back and the photographer's page
+    facts_path = FIXTURES / "harness-facts.json"
+    if not facts_path.exists():
+        pytest.skip("no facts fixture")
+    from app.models.facts import FactsBundle
+
+    facts = FactsBundle.model_validate(json.loads(facts_path.read_text()))
+    notes = documents.notes_md(sample, platforms, spec={"fps": 30}, facts=facts,
+                               credits=credits)
+    assert "## Credits" in notes
+    assert "https://www.pexels.com" in notes and "Kelly L" in notes
+    assert "https://www.pexels.com/video/12345/" in notes
+    # a reel that used no stock footage gets no section at all
+    assert "## Credits" not in documents.notes_md(sample, platforms, spec={"fps": 30},
+                                                  facts=facts)
+
+
 def test_the_text_negative_is_appended_to_the_workflows_own():
     from app.providers.visuals import workflow as wf
     from app.stages.visuals import TEXT_NEGATIVE

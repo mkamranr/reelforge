@@ -57,6 +57,10 @@ ANTHROPIC_API_KEY=
 # TTS — metered per character. Leave empty if you upload your own narration.
 ELEVENLABS_API_KEY=
 
+# Visuals — optional. Stock stills and footage instead of a ComfyUI server.
+# Free from pexels.com/api/; 200 requests an hour is roughly forty reels.
+PEXELS_API_KEY=
+
 # Ingest — optional. Raises the GitHub rate limit from 60 to 5000 requests/hour.
 GITHUB_TOKEN=
 HUGGINGFACE_TOKEN=
@@ -78,7 +82,7 @@ docker compose -f docker/docker-compose.yml up --build
 ```
 
 Four services come up: `api`, `worker`, `renderer` and `redis`. Open
-**http://localhost:8000/v2**.
+**http://localhost:8020/v2**.
 
 Compose publishes on `127.0.0.1` deliberately — the settings API accepts API
 keys. See *Securing the settings API*.
@@ -98,7 +102,7 @@ docker compose -f docker/docker-compose.yml exec ollama ollama pull qwen2.5:7b-i
 | Profile | Service | What it gives you |
 |---|---|---|
 | `local-llm` | `ollama` on `:11434` | Script and storyboard generation, offline |
-| `local-tts` | `kokoro-fastapi` on `:8080` | Narration, offline |
+| `local-tts` | `kokoro-fastapi` on `:8880` | Narration, offline |
 
 Expect weaker scripts from a 7B model — see the routing note in
 [CONFIGURATION.md](CONFIGURATION.md). Everything still validates and renders.
@@ -110,7 +114,7 @@ Expect weaker scripts from a 7B model — see the routing note in
 ```bash
 pip install -r requirements-dev.txt
 ./docker/fetch-fonts.sh
-uvicorn app.main:app --workers 1 --reload
+uvicorn app.main:app --workers 1 --reload --port 8020
 ```
 
 **`--workers 1` is not optional.** The queue takes a file lock, but the app

@@ -363,6 +363,66 @@ def test_every_catalogued_service_can_be_added_as_a_profile(client):
         assert build_llm("content", cfg, {"profile": name}).base_url
 
 
+def test_a_pexels_profile_is_addable_and_its_key_shows_up_masked(client, tmp_path, monkeypatch):
+    """The settings page is generated from the adapter's field list, so a new
+    visuals adapter needs no UI work -- but only if the fields, the defaults
+    and the key discovery all line up."""
+    import json
+
+    # the environment wins over the settings store, so a real key on this
+    # machine would answer for the stored one and the test would prove nothing
+    monkeypatch.delenv("PEXELS_API_KEY", raising=False)
+    body = client.put("/api/settings/visuals/profiles/stock", json={
+        "adapter": "pexels", "label": "Pexels",
+        "api_key_env": "PEXELS_API_KEY",
+        "settings": {"orientation": "portrait", "pool": 20},
+    }).json()
+    profile = next(p for p in body["visuals"]["profiles"] if p["name"] == "stock")
+    assert profile["adapter"] == "pexels"
+    assert {"api_key_env", "orientation", "pool", "clip_start"} <= {
+        f["key"] for f in profile["fields"]}
+    assert "pexels" in body["visuals"]["adapters"]
+
+    client.put("/api/settings/secrets",
+               json={"name": "PEXELS_API_KEY", "value": "563492ad-secret-value"})
+    secrets = client.get("/api/settings/secrets").json()["secrets"]
+    entry = next(s for s in secrets if s["name"] == "PEXELS_API_KEY")
+    assert entry["state"] == "set" and "563492ad-secret-value" not in json.dumps(secrets)
+    assert "563492ad-secret-value" not in json.dumps(client.get("/api/settings").json())
+    assert "563492ad-secret-value" not in (tmp_path / "settings.yaml").read_text()
+
+    # and the key actually reaches the provider the factory builds
+    from app.config import load_config
+    from app.providers.visuals import build_visuals
+
+    import app.config
+    app.config.get_config.cache_clear()
+    provider = build_visuals(load_config(), {"profile": "stock"})
+    assert provider.name == "pexels" and provider._key == "563492ad-secret-value"
+    assert provider.pool == 20
+
+
+def test_a_kokoro_profile_gets_a_voice_picker_not_a_text_box(client):
+    """The voice field's *type* is what turns the Settings control into a
+    picker fed by the server's own list. `local` keeps its plain text box,
+    because Piper has no voices endpoint and an always-empty picker is worse."""
+    body = client.put("/api/settings/tts/profiles/kokoro", json={
+        "adapter": "kokoro",
+        "settings": {"base_url": "http://localhost:8880", "voice": "af_heart",
+                     "speed": 1.0},
+    }).json()
+    profile = next(p for p in body["tts"]["profiles"] if p["name"] == "kokoro")
+    assert profile["adapter"] == "kokoro"
+    assert profile["api_key_env"] is None          # self-hosted: no key at all
+    fields = {f["key"]: f["type"] for f in profile["fields"]}
+    assert fields["voice"] == "voice"
+    assert {"base_url", "speed", "response_format"} <= set(fields)
+    assert "kokoro" in body["tts"]["adapters"]
+
+    other = next(p for p in body["tts"]["profiles"] if p["name"] == "local")
+    assert {f["key"]: f["type"] for f in other["fields"]}["voice"] == "text"
+
+
 def test_a_transient_server_error_is_not_a_mode_failure():
     """Google returned 503 "high demand" and all three structured-output modes
     were consumed in under a second, reporting the cause as unsupported

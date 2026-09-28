@@ -116,10 +116,19 @@ def script_txt(content: ReelContent, facts: FactsBundle) -> str:
     return "\n".join(out).rstrip() + "\n"
 
 
-def caption_block(content: ReelContent, platforms: PlatformBundle, number: int = 1) -> str:
-    """One `captions.txt`-style block: heading, then the post-ready body."""
+def caption_block(content: ReelContent, platforms: PlatformBundle, number: int = 1,
+                  credit: str = "") -> str:
+    """One `captions.txt`-style block: heading, then the post-ready body.
+
+    `credit` is the stock library's attribution line, appended to the body
+    that gets pasted into the post. Empty for a reel that used no stock
+    footage, which leaves the block byte-identical to what it always was.
+    """
     heading = f"REEL {number} -- {content.display_name.upper()}  ({content.slug}-reel.png)"
-    return "\n".join([RULE, heading, RULE, "", platforms.instagram.render_text()])
+    body = platforms.instagram.render_text()
+    if credit:
+        body = body.rstrip() + f"\n\n{credit}\n"
+    return "\n".join([RULE, heading, RULE, "", body])
 
 
 def notes_md(
@@ -128,6 +137,7 @@ def notes_md(
     *,
     spec: dict,
     facts: FactsBundle,
+    credits: list[dict] | None = None,
 ) -> str:
     """The `-reel-notes.md` delivery notes.
 
@@ -198,6 +208,21 @@ def notes_md(
     for scene in content.scenes:
         lines.append(f"- **{scene.title}** -- {scene.on_screen.splitlines()[0]}")
 
+    if credits:
+        # Pexels asks for a prominent link back and a credit to the
+        # photographer. This is where it is paid, for every picture that
+        # actually made it into the reel.
+        library = "Pexels" if credits[0].get("source") == "pexels" else credits[0]["source"]
+        home = "https://www.pexels.com" if credits[0].get("source") == "pexels" else ""
+        lines += ["", "## Credits", "",
+                  f"Stills and footage from **[{library}]({home})**."
+                  if home else f"Stills and footage from **{library}**.", ""]
+        for credit in credits:
+            who = credit.get("photographer") or "an uncredited photographer"
+            who = f"[{who}]({credit['photographer_url']})" if credit.get("photographer_url") else who
+            where = f" -- {credit['url']}" if credit.get("url") else ""
+            lines.append(f"- {credit['asset']}: {who}{where}")
+
     lines += ["", "## Accuracy", "",
               f"Facts checked {content.facts_checked_at.strftime('%d %B %Y')} "
               f"against {facts.primary_url}.", ""]
@@ -216,18 +241,28 @@ def phrases_txt(content: ReelContent) -> str:
     return "\n".join([header, *content.phrase_lines()]) + "\n"
 
 
-def metadata_files(content: ReelContent, platforms: PlatformBundle) -> dict[str, str]:
-    """Per-platform bundle: JSON for machines, text for pasting into a form."""
+def metadata_files(content: ReelContent, platforms: PlatformBundle,
+                   credit: str = "") -> dict[str, str]:
+    """Per-platform bundle: JSON for machines, text for pasting into a form.
+
+    `credit` is appended to every rendered body, because the attribution has
+    to travel with the copy wherever it is pasted -- not only to the notes.
+    """
     import json
+
+    def _with_credit(text: str) -> str:
+        return text.rstrip() + f"\n\n{credit}\n" if credit else text
 
     out: dict[str, str] = {}
     for post in platforms.all():
         name = post.platform
         payload = post.model_dump(mode="json")
-        payload["rendered"] = post.render_text()
+        payload["rendered"] = _with_credit(post.render_text())
         if name == "youtube":
-            payload["description"] = post.render_description()
+            payload["description"] = _with_credit(post.render_description())
+        if credit:
+            payload["credit"] = credit
         out[f"{name}.json"] = json.dumps(payload, indent=2, ensure_ascii=False)
-        out[f"{name}.txt"] = post.render_text()
+        out[f"{name}.txt"] = _with_credit(post.render_text())
     out["hashtags.txt"] = " ".join(content.hashtags) + "\n"
     return out

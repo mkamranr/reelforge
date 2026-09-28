@@ -77,7 +77,8 @@ tts:
   # upload     -- you supply the narration file
   # elevenlabs -- hosted, highest quality, metered per character
   # openai     -- hosted
-  # local      -- self-hosted Kokoro/Piper container (compose profile local-tts)
+  # kokoro     -- self-hosted Kokoro-FastAPI, free, no key (profile local-tts)
+  # local      -- any other self-hosted engine over HTTP (Piper, ...)
   # say        -- macOS `say`, development only, free and offline
   provider: upload
 
@@ -110,6 +111,24 @@ tts:
     voice: onyx                        # alloy|echo|fable|onyx|nova|shimmer|...
     api_key_env: OPENAI_API_KEY
 
+  # Kokoro: self-hosted, free, no key, runs on CPU. Either server works --
+  # Kokoro-TTS-OpenAPI (python -m app, port 8080) or the Kokoro-FastAPI
+  # container the local-tts compose profile starts (port 8880); the adapter
+  # finds whichever voice endpoint is there. Voices are <language><gender>_<name> --
+  # af_heart is American female, bm_george British male -- and the Settings
+  # page lists what the server actually has rather than making you recall
+  # them. A weighted blend works too: af_bella(2)+af_heart(1).
+  kokoro:
+    base_url: http://localhost:8080   # Kokoro-TTS-OpenAPI; the container is :8880
+    voice: af_heart
+    model: kokoro
+    response_format: wav
+    speed: 1.0
+    language: ""                      # empty = the voice decides
+    request_timeout: 300              # CPU inference is roughly real time
+
+  # The generic self-hosted adapter: anything that takes {text, voice} over
+  # HTTP. Kokoro has its own profile above; this is for Piper and the rest.
   local:
     base_url: http://tts:8080
     voice: af_heart
@@ -173,6 +192,22 @@ visuals:
       image_height: 1536
       request_timeout: 1800      # a 5 s LTX clip is minutes on a single GPU
       api_key_env: ""            # only for a server behind an auth proxy
+    # Stock photography and footage instead of a generator: no GPU, no
+    # workflows, a free key from https://www.pexels.com/api/. The pictures are
+    # searched, so the art director's two-word `query` per scene is what does
+    # the work, and the scene's seed picks among the results. No audio: Pexels
+    # has no sound library, so a music bed still needs a ComfyUI profile.
+    pexels:
+      adapter: pexels
+      api_key_env: PEXELS_API_KEY
+      orientation: portrait        # the reel is 1080x1920; anything else is cropped hard
+      photo_size: large
+      video_quality: hd            # the smallest file at least 1080 wide wins either way
+      pool: 15                     # results per search to choose among; max 80
+      clip_start: 0.5              # skip a fade-in, when the shot is long enough to spare it
+      image_width: 1152            # what the still is prepared to, as with ComfyUI
+      image_height: 1536
+      request_timeout: 60
   # How much a reel gets. Ceilings: a three-scene script has one body scene.
   # Clips are the point -- moving pictures carry a reel -- and are assigned to
   # the body scenes first; stills only take scenes left over.

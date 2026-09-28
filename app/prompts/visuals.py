@@ -37,6 +37,15 @@ Rules for `heading`:
 - 2-5 words that the viewer should read over the picture: the scene's claim,
   in the narration's own words where possible. Title case. No full stop.
 
+Rules for `query`:
+- 2-4 words for searching a stock photography library for the same subject,
+  used when the pictures are found rather than drawn.
+- Plain concrete nouns and at most one adjective: "copper wire macro", "brass
+  key slate", "glass office night". No style words, no camera words, no
+  colours, no project name, no punctuation.
+- Describe the SUBJECT of your `still`, not the mood of it. A library has
+  millions of photographs of a thing and none of an atmosphere.
+
 Return every scene you are given, in order.
 """
 
@@ -46,6 +55,9 @@ class SceneDirection(BaseModel):
     still: str = Field(min_length=20, max_length=420)
     clip: str = Field(min_length=20, max_length=420)
     heading: str = Field(min_length=2, max_length=40)
+    #: Optional: only a search-based visuals adapter reads it, and the stage
+    #: derives one by rule when it is missing.
+    query: str = Field(default="", max_length=60)
 
 
 class ArtDirection(BaseModel):
@@ -70,7 +82,8 @@ Palette words the pictures should sit in: {palette}
 SCENES
 {plan}
 
-For each scene above, give `still`, `clip` and `heading` as described. Remember:
-nothing with text in the pictures -- the heading is painted on afterwards.
+For each scene above, give `still`, `clip`, `heading` and `query` as described.
+Remember: nothing with text in the pictures -- the heading is painted on
+afterwards.
 """
     return SYSTEM, user

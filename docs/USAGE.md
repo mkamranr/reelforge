@@ -6,7 +6,7 @@ Three interfaces, one pipeline: the web UI, the CLI, and the HTTP API.
 
 ## The web UI
 
-Open **http://localhost:8000/v2**.
+Open **http://localhost:8020/v2**.
 
 | Page | What it is for |
 |---|---|
@@ -143,7 +143,7 @@ the same inside the container.
 
 ## The HTTP API
 
-Interactive docs at **http://localhost:8000/docs**.
+Interactive docs at **http://localhost:8020/docs**.
 
 ### Jobs
 

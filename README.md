@@ -4,6 +4,8 @@
 [![FastAPI](https://img.shields.io/badge/FastAPI-service-009688?logo=fastapi&logoColor=white)](docs/ARCHITECTURE.md)
 [![FFmpeg 4.0+](https://img.shields.io/badge/FFmpeg-4.0%2B-007808?logo=ffmpeg&logoColor=white)](docs/SETUP.md)
 [![ComfyUI visuals](https://img.shields.io/badge/ComfyUI-Qwen--Image%20%C2%B7%20LTX--2.5-8A63D2)](docs/CONFIGURATION.md#generated-imagery-comfyui)
+[![Pexels stock](https://img.shields.io/badge/Pexels-stock%20stills%20%C2%B7%20footage-05A081)](docs/CONFIGURATION.md#stock-footage-pexels)
+[![Kokoro narration](https://img.shields.io/badge/Kokoro-free%20CPU%20voices-F6A21E)](docs/CONFIGURATION.md#kokoro-narration)
 [![Fish-Speech narration](https://img.shields.io/badge/Fish--Speech-voice%20cloning-FF6F61)](docs/CONFIGURATION.md#fish-speech-narration)
 [![Output](https://img.shields.io/badge/output-1080%C3%971920%20%C2%B7%2030fps-111111)](docs/CONFIGURATION.md#encode-settings--do-not-drift)
 [![Self-hosted](https://img.shields.io/badge/self--hosted-no%20required%20APIs-2E7D32)](docs/CONFIGURATION.md)
@@ -88,7 +90,7 @@ The retention rules are baked into the storyboards, not left to chance:
 git clone <your-repo-url> reelforge && cd reelforge
 cp .env.example .env                                    # fill in only what you use
 docker compose -f docker/docker-compose.yml up --build
-open http://localhost:8000/v2
+open http://localhost:8020/v2
 ```
 
 Fully local, no API keys at all:
@@ -104,7 +106,7 @@ Without Docker, for development — no Redis needed, stages run inline:
 ```bash
 pip install -r requirements-dev.txt
 ./docker/fetch-fonts.sh
-uvicorn app.main:app --workers 1 --reload
+uvicorn app.main:app --workers 1 --reload --port 8020
 ```
 
 Then check the environment is actually sound:
@@ -197,6 +199,32 @@ backdrop painted under the cover's typography. Two API-format workflows ship in
 `app/workflows/` -- Qwen-Image 2512 for stills, LTX 2.5 text-to-video for
 clips -- and the adapter rewrites their prompt, size, seed and duration nodes.
 Off by default; with it off the pipeline is exactly what it was.
+
+## Narration without a key (Kokoro)
+
+Optional, and the cheapest good voice there is. Point a **kokoro** voice
+profile at either server that speaks the API — [Kokoro-TTS-OpenAPI][k1] runs
+CPU-native on macOS with no container, or `--profile local-tts` starts a
+[Kokoro-FastAPI][k2] one — and narration costs nothing and never leaves the
+machine. The Settings page lists the voices the server actually has, graded,
+rather than making you recall that `af_heart` is the American female one, and
+a weighted blend (`af_bella(2)+af_heart(1)`) works if you want one. Budget for
+it: on CPU this is roughly 4× slower than real time.
+
+[k1]: https://github.com/mkamranr/Kokoro-TTS-OpenAPI
+[k2]: https://github.com/remsky/Kokoro-FastAPI
+
+## Stock imagery (Pexels)
+
+Also optional, and the same thing without a GPU. Put a free
+[Pexels](https://www.pexels.com/api/) key in Settings, pick the **pexels**
+profile, and the pictures are searched rather than drawn: a photograph per
+body scene, real motion footage for the clips, a photographic cover backdrop.
+The art director writes a short search term per scene alongside the shot it
+already writes, and the scene's seed picks among the results, so a re-run
+reproduces the same pictures. Credits land in the delivery notes and the
+caption copy, which is what the licence asks for. No music bed from this
+profile -- Pexels has no sound library.
 
 The same profile can carry a Stable Audio workflow for an optional music bed
 under the narration and generated cut sounds -- music and effects, not speech.

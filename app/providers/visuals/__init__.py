@@ -9,7 +9,7 @@ from app.providers.visuals.base import AudioResult, ClipResult, StillResult, Vis
 __all__ = ["AudioResult", "ClipResult", "StillResult", "VisualsError", "VisualsProvider",
            "build_visuals", "probe", "PROVIDERS"]
 
-PROVIDERS = ("none", "comfyui", "fake")
+PROVIDERS = ("none", "comfyui", "pexels", "fake")
 
 
 class NoneProvider(VisualsProvider):
@@ -23,7 +23,8 @@ class NoneProvider(VisualsProvider):
 
     def health(self) -> dict[str, Any]:
         return {"provider": "none", "reachable": True,
-                "note": "Generated visuals are off. Pick a ComfyUI profile to turn them on."}
+                "note": "Pictures are off. Pick a ComfyUI profile to generate them, "
+                        "or a Pexels profile to search for them."}
 
 
 def build_visuals(cfg: Config | None = None, overrides: dict[str, Any] | None = None) -> VisualsProvider:
@@ -46,6 +47,10 @@ def build_visuals(cfg: Config | None = None, overrides: dict[str, Any] | None = 
         from app.providers.visuals.comfyui import ComfyUIProvider
 
         return ComfyUIProvider(settings)
+    if name == "pexels":
+        from app.providers.visuals.pexels import PexelsProvider
+
+        return PexelsProvider(settings)
     if name == "fake":
         from app.providers.visuals.fake import FakeProvider
 

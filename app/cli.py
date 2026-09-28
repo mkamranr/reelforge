@@ -150,14 +150,19 @@ def cmd_doctor(args) -> int:
         from app.providers.visuals import probe
 
         health = probe(cfg)
-        detail = health.get("error") or (
-            f"{health.get('base_url')} "
-            + ", ".join(f"{d.get('name')} {d.get('vram_gb')} GB" for d in health.get("devices") or [])
-        )
-        checks.append((f"comfyui ({cfg.visuals.active})", bool(health.get("reachable"))
-                       and not health.get("error"), detail))
+        # What is worth printing differs by backend: a GPU server is its
+        # devices, a keyed web API is its quota.
+        detail = health.get("error") or " ".join(x for x in (
+            str(health.get("base_url") or ""),
+            ", ".join(f"{d.get('name')} {d.get('vram_gb')} GB"
+                      for d in health.get("devices") or []),
+            (f"{health['quota_remaining']} requests left"
+             if health.get("quota_remaining") is not None else ""),
+        ) if x)
+        checks.append((f"{health.get('provider') or 'visuals'} ({cfg.visuals.active})",
+                       bool(health.get("reachable")) and not health.get("error"), detail))
     else:
-        checks.append(("generated visuals", True, "off (no ComfyUI profile active)"))
+        checks.append(("pictures", True, "off (no visuals profile active)"))
 
     ok = True
     for name, passed, detail in checks:

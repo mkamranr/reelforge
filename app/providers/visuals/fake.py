@@ -26,7 +26,8 @@ class FakeProvider(VisualsProvider):
         self.calls: list[dict[str, Any]] = []
 
     def still(self, prompt: str, out: Path, *, width: int, height: int,
-              seed: int, negative: str = "", progress=None) -> StillResult:
+              seed: int, negative: str = "", query: str = "",
+              progress=None) -> StillResult:
         from PIL import Image, ImageDraw
 
         self.calls.append({"kind": "still", "prompt": prompt, "seed": seed})
@@ -44,7 +45,8 @@ class FakeProvider(VisualsProvider):
         return StillResult(path=out, width=width, height=height, seed=seed, prompt=prompt)
 
     def clip(self, prompt: str, out_dir: Path, *, seconds: float, fps: int,
-             width: int, height: int, seed: int, negative: str = "", progress=None) -> ClipResult:
+             width: int, height: int, seed: int, negative: str = "", query: str = "",
+             progress=None) -> ClipResult:
         from PIL import Image, ImageDraw
 
         self.calls.append({"kind": "clip", "prompt": prompt, "seed": seed})

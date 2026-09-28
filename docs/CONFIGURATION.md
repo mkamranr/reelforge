@@ -48,8 +48,9 @@ tts:
 
 Available LLM adapters: `openai` (any OpenAI-compatible endpoint), `ollama`,
 `anthropic`, `fake` (for tests).
-TTS adapters: `upload`, `elevenlabs`, `openai`, `local` (Kokoro/Piper), `say`
-(macOS, development only).
+TTS adapters: `upload`, `elevenlabs`, `openai`, `kokoro` (self-hosted, free),
+`fish` (self-hosted voice cloning), `local` (Piper and other generic HTTP
+engines), `say` (macOS, development only).
 
 An older `config.yaml` using the pre-profiles shape — a `provider:` key beside
 fixed per-vendor blocks — is still read and converted automatically.
@@ -218,6 +219,73 @@ checkpoint shows up before a job spends ten minutes finding out.
 "clips": ..., "cover": ..., "profile": ...}}`. Changing it re-runs from
 `content` downstream, because the backdrop is drawn by the cover stage.
 
+## Stock footage (Pexels)
+
+The other way to get pictures, and the one that needs no hardware:
+
+```yaml
+visuals:
+  active: pexels
+  profiles:
+    pexels:
+      adapter: pexels
+      api_key_env: PEXELS_API_KEY
+      orientation: portrait
+      pool: 15
+  stills: 1
+  clips: 3
+```
+
+A free key from [pexels.com/api](https://www.pexels.com/api/), pasted into
+Settings or set in `.env`, and every reel gets photographs and real motion
+footage instead of generated stills. Same profile controls as any other —
+add, test, use — and the same `stills` / `clips` / `cover` counts. Nothing
+else in the pipeline changes: the pictures are placed by the same screen
+catalogue, the clips are the same JPEG frames, the `motion` layout ping-pongs
+them the same way.
+
+**It searches, it does not draw.** That is the whole difference, and it shows
+up in three places:
+
+- **The search term matters more than the prompt.** The art director already
+  rewrites each scene into a text-free shot; it now also returns a two-to-four
+  word `query` for that same subject, and that is what gets searched. With
+  `art_director: false`, or when the model call fails, the query is cut down
+  from the shot description by rule instead — blunter, but it still finds
+  something.
+- **The seed picks rather than generates.** One search returns `pool` results
+  and the scene's seed chooses among them, so an unchanged direction
+  reproduces the same photograph on a re-run, exactly as an unchanged prompt
+  reproduces the same generation. Two scenes never get the same picture.
+  Raising `pool` varies the choice and costs no extra request.
+- **The pictures have authors.** Pexels asks for a link back and a credit, so
+  each asset records its photographer and page URL in `visuals.json`, and the
+  package stage writes them into the bundle: a `## Credits` section in
+  `<slug>-reel-notes.md`, and a `Footage: Pexels (…)` line appended to
+  `captions.txt` and every file under `metadata/`. Nothing is burned into the
+  video.
+
+**Clips** are trimmed, not padded. Stock footage is ten to thirty seconds and a
+reel wants `clip_seconds` of it, so ffmpeg cuts the length it needs starting
+`clip_start` seconds in — stock shots routinely open on a fade or a settling
+camera, and the reel cuts to the first frame with no run-up. Of the files
+Pexels offers for a clip, the smallest one at least 1080 wide wins: both are
+centre-cropped to the same 1080×1920 and only one of them is a 300 MB
+download. Anything over 120 MB is refused outright.
+
+**Keep `orientation: portrait`.** Frames are scaled to cover and centre-cropped,
+so a landscape source keeps a 1080-wide sliver out of the middle and throws
+away the rest.
+
+**No audio.** Pexels has no sound library, so `visuals.music` and
+`sfx_samples` do nothing on this profile — the stage says so and carries on
+with the synthesized cut sounds. A music bed needs a ComfyUI profile with an
+`audio_workflow`.
+
+**Rate limits.** 200 requests an hour and 20,000 a month on a free key. A reel
+spends one request per picture, so about forty reels an hour. **Test** reports
+what is left on the quota.
+
 ### Generated audio: a music bed and the cut sounds
 
 The same ComfyUI profile can carry a text-to-audio workflow (`audio_workflow`;
@@ -241,6 +309,65 @@ text-to-audio model has no words, and narration stays with the voice profiles
   `data/sfx/<profile>/` -- `python -m app.cli sfx-library` does it up front,
   or the first reel that asks does -- and swapped in by the mix shim with the
   storyboard's `amp` and `dur` honoured, so no storyboard changes.
+
+### Kokoro narration
+
+The cheapest good voice: self-hosted, free, no key, and it runs on CPU.
+
+```yaml
+tts:
+  active: kokoro
+  profiles:
+    kokoro:
+      adapter: kokoro
+      base_url: http://localhost:8080
+      voice: af_heart
+      speed: 1.0
+```
+
+**Two servers speak this API and one adapter drives both.**
+
+| | port | voices | how |
+|---|---|---|---|
+| [Kokoro-TTS-OpenAPI](https://github.com/mkamranr/Kokoro-TTS-OpenAPI) | 8080 | 28 English, graded | `./scripts/setup_mac.sh` then `python -m app` — CPU-native on macOS, no container |
+| [Kokoro-FastAPI](https://github.com/remsky/Kokoro-FastAPI) | 8880 | more, multilingual | `docker compose -f docker/docker-compose.yml --profile local-tts up -d tts` |
+
+Synthesis is identical on both — `POST /v1/audio/speech`, OpenAI-shaped. They
+differ only in where the voice list lives (`/voices` and `/v1/audio/voices`
+respectively), and the adapter tries both rather than making you say which you
+run. Point `base_url` at whichever you have.
+
+**Voices are listed, not memorised.** The profile editor's **Voice** field is
+a picker filled from the server. Where the server describes its voices
+properly, the description carries through — *Heart — American female (A)* —
+and the **quality grade is the useful part**: an A voice and a C voice are
+audibly different, and the narration is the entire soundtrack of a reel. The
+field still accepts anything typed, so a weighted blend works:
+`af_bella(2)+af_heart(1)` is a 67/33 mix the server resolves itself.
+
+**Test checks the voice, not just the port.** A voice id that does not exist
+is not rejected when you save it — it fails on the first phrase, a dozen calls
+into a narration. So the probe compares the configured voice against the
+served list and names the near miss (`af_heartt` → *close by: af_heart,
+af_bella*).
+
+**Speed** changes how long the reel is, not just how it sounds: the storyboard
+paces its screens to the narration, so a slower voice makes a longer video.
+
+**It is not fast on CPU.** Measured on an Intel Mac against
+Kokoro-TTS-OpenAPI, synthesis runs about **4× slower than real time** — a
+4.7-second phrase took ~20 seconds. A 40-second narration is therefore a few
+minutes, spread over a dozen per-phrase calls, and `request_timeout` defaults
+to 300 s for that reason. A GPU changes this completely; a hosted engine
+avoids it entirely.
+
+If the server has `KOKORO_API_KEY` set, name the variable holding it in **API
+key variable** and it is sent as a bearer token. Most self-hosted setups have
+none.
+
+For **Piper** or any other self-hosted engine that takes `{text, voice}` over
+HTTP, use the generic `local` adapter instead; it has no voice listing,
+because those servers do not offer one.
 
 ### Fish-Speech narration
 

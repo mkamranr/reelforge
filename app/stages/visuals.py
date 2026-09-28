@@ -77,6 +77,9 @@ class Asset:
     scene_title: str
     prompt: str
     seed: int
+    #: a few keywords for an adapter that searches a library rather than
+    #: drawing; ignored by a generator, which reads `prompt`
+    query: str = ""
     #: the words the renderer paints over the picture afterwards
     heading: str = ""
     ok: bool = False
@@ -227,10 +230,33 @@ def art_direct(content: ReelContent, scene_indexes: list[int], llm, *,
     for item in result.parsed.scenes:
         if item.scene_index in scene_indexes:
             out[item.scene_index] = {"still": item.still.strip(), "clip": item.clip.strip(),
-                                     "heading": item.heading.strip().rstrip(".")}
+                                     "heading": item.heading.strip().rstrip("."),
+                                     "query": item.query.strip().strip(".,").lower()}
     if progress:
         progress(f"art direction: {len(out)} scene(s) described as text-free shots")
     return out
+
+
+def search_query(scene: Scene, content: ReelContent, direction: str | None = None) -> str:
+    """A few keywords for a stock library, when nothing better was supplied.
+
+    The art director writes a `query` per scene and it is much the better
+    term; this is what happens when that call is switched off or fails. The
+    shot description is already text-free and photographable, so the job is
+    only to cut it down to nouns a search engine can match.
+    """
+    from app.providers.visuals.pexels import squeeze_query
+
+    source = (direction or clean_direction(scene.b_roll) or clean_direction(scene.on_screen)
+              or metaphor_for(scene, content))
+    return squeeze_query(source)
+
+
+def cover_query(content: ReelContent) -> str:
+    """The backdrop's search term: the cover's motif, in plain nouns."""
+    motif = {"plugins": "modular blocks abstract", "artboards": "translucent layers abstract",
+             "flow": "light ribbons abstract", "swarm": "glowing particles abstract"}
+    return motif.get(content.cover.motif, "abstract dark texture")
 
 
 def cover_prompt(content: ReelContent, style: str) -> str:
@@ -298,6 +324,7 @@ def plan(content: ReelContent, *, job_id: str, stills: int, clips: int, style: s
         prompt = clip_prompt(scene, content, style, d.get("clip"))
         assets.append(Asset(kind="clip", index=n, scene_index=scene.index, scene_title=scene.title,
                             prompt=prompt, seed=seed_for(job_id, "clip", n, prompt),
+                            query=d.get("query") or search_query(scene, content, d.get("clip")),
                             width=FRAME_W, height=FRAME_H,
                             heading=d.get("heading") or scene.title))
 
@@ -312,6 +339,7 @@ def plan(content: ReelContent, *, job_id: str, stills: int, clips: int, style: s
         prompt = still_prompt(scene, content, style, d.get("still"))
         assets.append(Asset(kind="still", index=n, scene_index=scene.index, scene_title=scene.title,
                             prompt=prompt, seed=seed_for(job_id, "still", n, prompt), fit=still_fit,
+                            query=d.get("query") or search_query(scene, content, d.get("still")),
                             heading=d.get("heading") or scene.title))
     return assets
 
@@ -360,7 +388,7 @@ def _make_still(asset, provider, job_root, visuals_dir, prepared_dir, size, nega
     note(f"still {asset.index} for scene {asset.scene_index} ({asset.scene_title}): generating")
     raw = visuals_dir / f"still-{asset.index}.png"
     result = provider.still(asset.prompt, raw, width=size[0], height=size[1], seed=asset.seed,
-                            negative=negative, progress=note)
+                            negative=negative, query=asset.query, progress=note)
     prepared = prepared_dir / f"gen-still-{asset.index}.png"
     width, height = prepare(raw, prepared, fit=asset.fit, crop=Crop())
     asset.source = str(raw.relative_to(job_root)).replace("\\", "/")
@@ -377,7 +405,7 @@ def _make_clip(asset, provider, job_root, visuals_dir, seconds, negative, note):
         shutil.rmtree(frames_dir, ignore_errors=True)
     result = provider.clip(asset.prompt, frames_dir, seconds=seconds, fps=REEL_FPS,
                            width=FRAME_W, height=FRAME_H, seed=asset.seed,
-                           negative=negative, progress=note)
+                           negative=negative, query=asset.query, progress=note)
     asset.file = str(result.frames_dir.relative_to(job_root)).replace("\\", "/")
     asset.source = (str(result.source.relative_to(job_root)).replace("\\", "/")
                     if result.source else "")
@@ -458,6 +486,46 @@ def write_assets(visuals_json: Path, assets: list[Asset], *, provider: str, extr
     payload = {"provider": provider, "assets": [asdict(a) for a in assets]}
     payload.update(extra or {})
     visuals_json.write_text(json.dumps(payload, indent=2), encoding="utf-8")
+
+
+def credits_from(assets: list[Asset], cover_meta: dict | None = None) -> list[dict]:
+    """Who to credit for the pictures that actually shipped.
+
+    A generated asset has nobody to credit and contributes nothing; a stock
+    one carries its photographer and page URL in `meta`, put there by the
+    adapter. The cover backdrop is made by the cover stage, which writes no
+    visuals.json, so its credit arrives separately out of that stage's meta.
+    """
+    out: list[dict] = []
+    seen: set[tuple] = set()
+    entries = [(f"{a.kind} {a.index}", a.meta) for a in assets if a.ok]
+    if cover_meta:
+        entries.insert(0, ("cover backdrop", cover_meta))
+    for label, meta in entries:
+        if not meta or not meta.get("source"):
+            continue
+        key = (meta.get("source"), meta.get("id"))
+        if key in seen:
+            continue
+        seen.add(key)
+        out.append({"asset": label, "source": meta["source"],
+                    "photographer": meta.get("photographer") or "",
+                    "photographer_url": meta.get("photographer_url") or "",
+                    "url": meta.get("url") or ""})
+    return out
+
+
+def credit_line(credits: list[dict]) -> str:
+    """One line for a caption: the library, and who to thank."""
+    if not credits:
+        return ""
+    names: list[str] = []
+    for credit in credits:
+        name = credit.get("photographer")
+        if name and name not in names:
+            names.append(name)
+    library = "Pexels" if credits[0].get("source") == "pexels" else credits[0].get("source", "")
+    return f"Footage: {library}" + (f" ({', '.join(names)})" if names else "")
 
 
 def stills_for_storyboard(assets: list[Asset], job_root: Path) -> list[dict]:

@@ -176,7 +176,8 @@ class TTSProfile(BaseModel):
 
     model_config = ConfigDict(extra="allow")
 
-    adapter: Literal["upload", "elevenlabs", "openai", "local", "say", "fish", "fake"] = "upload"
+    adapter: Literal["upload", "elevenlabs", "openai", "kokoro", "local", "say", "fish",
+                     "fake"] = "upload"
     label: str = ""
 
     def settings(self) -> dict[str, Any]:
@@ -210,6 +211,11 @@ TTS_DEFAULTS: dict[str, dict[str, Any]] = {
         "model": "gpt-4o-mini-tts", "voice": "onyx",
         "api_key_env": "OPENAI_API_KEY",
     },
+    # Self-hosted Kokoro-FastAPI. No key: the only thing it needs is a URL.
+    # Port 8880 is the server's own default and what works outside compose.
+    "kokoro": {"base_url": "http://localhost:8080", "voice": "af_heart",
+               "model": "kokoro", "response_format": "wav", "speed": 1.0,
+               "language": "", "request_timeout": 300},
     "local": {"base_url": "http://tts:8080", "voice": "af_heart", "engine": "kokoro"},
     "say": {"voice": "Daniel", "rate": 165},
     "fish": {"base_url": "http://localhost:7860", "api_name": "/partial",
@@ -227,7 +233,7 @@ class VisualsProfile(BaseModel):
 
     model_config = ConfigDict(extra="allow")
 
-    adapter: Literal["none", "comfyui", "fake"] = "none"
+    adapter: Literal["none", "comfyui", "pexels", "fake"] = "none"
     label: str = ""
 
     def settings(self) -> dict[str, Any]:
@@ -268,6 +274,19 @@ VISUALS_DEFAULTS: dict[str, dict[str, Any]] = {
         "image_width": 1152, "image_height": 1536,
         "request_timeout": 1800,
         "api_key_env": "",
+    },
+    # Stock photography and footage instead of a generator. No GPU, no
+    # workflows: a free key and a search term per scene.
+    "pexels": {
+        "api_key_env": "PEXELS_API_KEY",
+        "orientation": "portrait",     # the reel is 1080x1920
+        "photo_size": "large",
+        "video_quality": "hd",
+        "pool": 15,                    # results to choose among; the seed picks
+        "clip_start": 0.5,             # skip a fade-in, when the shot is long enough
+        "image_width": 1152,           # what the still is prepared to, as with ComfyUI
+        "image_height": 1536,
+        "request_timeout": 60,
     },
     "fake": {},
 }
@@ -427,6 +446,31 @@ PROFILE_FIELDS: dict[str, list[dict[str, Any]]] = {
         {"key": "base_url", "label": "Base URL", "type": "text"},
         {"key": "api_key_env", "label": "API key variable", "type": "keyname"},
     ],
+    "kokoro": [
+        {"key": "base_url", "label": "Base URL", "type": "text",
+         "help": "Kokoro-TTS-OpenAPI runs on 8080; the Kokoro-FastAPI container "
+                 "on 8880 (http://tts:8880 inside compose). Either works -- the "
+                 "adapter finds whichever voice endpoint the server has."},
+        {"key": "voice", "label": "Voice", "type": "voice",
+         "help": "Pick from what the server actually has. Named "
+                 "<language><gender>_<name>: af_heart is American female, "
+                 "bm_george British male. A weighted blend also works if you type "
+                 "one: af_bella(2)+af_heart(1)."},
+        {"key": "speed", "label": "Speed", "type": "number", "step": 0.05,
+         "help": "1.0 is the model's own pace. The reel's timing comes from the "
+                 "narration, so this changes how long the video is."},
+        {"key": "response_format", "label": "Audio format", "type": "select",
+         "options": ["wav", "mp3", "flac", "opus", "pcm"],
+         "help": "wav is lossless and the joiner's own format; the others are "
+                 "re-encoded on the way in for no gain."},
+        {"key": "language", "label": "Language code", "type": "text",
+         "help": "Leave empty and the voice decides. Only set it to override "
+                 "the pronunciation rules, e.g. 'a' for American English."},
+        {"key": "model", "label": "Model", "type": "text"},
+        {"key": "request_timeout", "label": "Request timeout (s)", "type": "number",
+         "help": "CPU inference runs at roughly real time, so a long phrase takes "
+                 "as long as it lasts."},
+    ],
     "local": [
         {"key": "base_url", "label": "Base URL", "type": "text"},
         {"key": "voice", "label": "Voice", "type": "text"},
@@ -486,6 +530,32 @@ PROFILE_FIELDS: dict[str, list[dict[str, Any]]] = {
                  "cleanly to the full frame."},
         {"key": "request_timeout", "label": "Generation timeout (s)", "type": "number"},
     ],
+    "pexels": [
+        {"key": "api_key_env", "label": "API key variable", "type": "keyname",
+         "help": "A free key from pexels.com/api/. 200 requests an hour, which is "
+                 "around forty reels -- one search per picture."},
+        {"key": "orientation", "label": "Orientation", "type": "select",
+         "options": ["portrait", "square", "landscape"],
+         "help": "The reel is 1080x1920. Anything but portrait is centre-cropped "
+                 "hard and loses most of its sides."},
+        {"key": "photo_size", "label": "Minimum photo size", "type": "select",
+         "options": ["large", "medium", "small"]},
+        {"key": "video_quality", "label": "Preferred video quality", "type": "select",
+         "options": ["hd", "sd"],
+         "help": "Of the files offered for a clip, the smallest one at least 1080 "
+                 "wide is taken -- both are cropped to the same frame and only one "
+                 "of them is a 300 MB download."},
+        {"key": "pool", "label": "Results to choose among", "type": "number",
+         "help": "One search returns this many; the scene's seed picks one of them. "
+                 "A bigger pool varies the picture without costing another request. "
+                 "Max 80."},
+        {"key": "clip_start", "label": "Skip into the clip (s)", "type": "number",
+         "step": 0.1,
+         "help": "Stock footage often opens on a fade or a settling camera, and the "
+                 "reel cuts to the first frame with no run-up. Ignored when the shot "
+                 "is too short to spare it."},
+        {"key": "request_timeout", "label": "Request timeout (s)", "type": "number"},
+    ],
 }
 
 
@@ -518,7 +588,7 @@ class TTSCfg(BaseModel):
             return data
         data = dict(data)
         profiles: dict[str, Any] = {}
-        for adapter in ("elevenlabs", "openai", "local", "say", "fish"):
+        for adapter in ("elevenlabs", "openai", "kokoro", "local", "say", "fish"):
             block = data.pop(adapter, None)
             if isinstance(block, dict):
                 profiles[adapter] = {**block, "adapter": adapter}

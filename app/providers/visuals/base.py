@@ -68,11 +68,18 @@ class VisualsProvider(abc.ABC):
 
     @abc.abstractmethod
     def still(self, prompt: str, out: Path, *, width: int, height: int,
-              seed: int, negative: str = "") -> StillResult:
-        """Generate one image and write it to `out` as PNG."""
+              seed: int, negative: str = "", query: str = "") -> StillResult:
+        """Generate one image and write it to `out` as PNG.
+
+        `query` is the same picture in two or three words. A generator has no
+        use for it and ignores it; an adapter that searches a stock library
+        needs it, because `prompt` is written for a diffusion model and is far
+        too long to match anything.
+        """
 
     def clip(self, prompt: str, out_dir: Path, *, seconds: float, fps: int,
-             width: int, height: int, seed: int, negative: str = "") -> ClipResult:
+             width: int, height: int, seed: int, negative: str = "",
+             query: str = "") -> ClipResult:
         """Generate one clip and extract its frames into `out_dir`."""
         raise VisualsError(f"the {self.name} adapter does not generate clips")
 

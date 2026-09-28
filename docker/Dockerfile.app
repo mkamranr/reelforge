@@ -28,8 +28,8 @@ RUN useradd --create-home --uid 10001 reelforge \
     && mkdir -p /app/data/jobs && chown -R reelforge:reelforge /app/data
 USER reelforge
 
-EXPOSE 8000
+EXPOSE 8020
 HEALTHCHECK --interval=30s --timeout=5s --start-period=20s \
-    CMD curl -fsS http://localhost:8000/api/health || exit 1
+    CMD curl -fsS http://localhost:8020/api/health || exit 1
 
-CMD ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8000"]
+CMD ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8020"]

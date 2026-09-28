@@ -14,7 +14,7 @@ __all__ = [
     "join", "build_tts", "list_voices", "voice_field", "PROVIDERS",
 ]
 
-PROVIDERS = ("upload", "elevenlabs", "openai", "local", "say", "fish")
+PROVIDERS = ("upload", "elevenlabs", "openai", "kokoro", "local", "say", "fish")
 
 
 #: Each engine names the voice differently. A caller -- the UI, a job override,
@@ -23,6 +23,7 @@ PROVIDERS = ("upload", "elevenlabs", "openai", "local", "say", "fish")
 VOICE_KEY = {
     "elevenlabs": "voice_id",
     "openai": "voice",
+    "kokoro": "voice",
     "local": "voice",
     "say": "voice",
     "fish": "reference_id",
@@ -71,6 +72,10 @@ def build_tts(
         from app.providers.tts.fish import FishSpeechProvider
 
         return FishSpeechProvider(settings)
+    if name == "kokoro":
+        from app.providers.tts.kokoro import KokoroProvider
+
+        return KokoroProvider(settings)
     return {
         "upload": impl.UploadProvider,
         "elevenlabs": impl.ElevenLabsProvider,

@@ -166,10 +166,11 @@ def run_cover(job: Job, store: JobStore, progress: Progress | None = None) -> di
     # that is down is no reason to ship without one.
     backdrop = None
     backdrop_note = ""
+    backdrop_credit: dict = {}
     settings = visuals_settings(job)
     if settings["enabled"] and settings["cover"]:
         from app.providers.visuals import build_visuals
-        from app.stages.visuals import cover_prompt, seed_for
+        from app.stages.visuals import cover_prompt, cover_query, seed_for
 
         prompt = cover_prompt(content, cfg.visuals.style)
         try:
@@ -180,9 +181,14 @@ def run_cover(job: Job, store: JobStore, progress: Progress | None = None) -> di
             result = provider.still(prompt, paths.cover_backdrop, width=1080, height=1920,
                                     seed=seed_for(job.id, "cover", 0, prompt),
                                     negative=", ".join(x for x in (TEXT_NEGATIVE, cfg.visuals.negative) if x),
+                                    query=cover_query(content),
                                     progress=lambda m: _note(job, progress, m))
             backdrop = result.path
             backdrop_note = prompt
+            # The cover stage writes no visuals.json, so the one place the
+            # backdrop's attribution can live is this stage's own meta. The
+            # package stage reads it back to build the credits.
+            backdrop_credit = dict(result.meta or {})
             provider.release()
         except Exception as exc:
             _note(job, progress, f"cover backdrop skipped: {str(exc)[:200]}")
@@ -201,7 +207,8 @@ def run_cover(job: Job, store: JobStore, progress: Progress | None = None) -> di
     return {"artifacts": artifacts,
             "meta": {"motif": content.cover.motif, "bytes": out.stat().st_size,
                      "fit_problems": fit_problems,
-                     "backdrop": bool(backdrop), "backdrop_prompt": backdrop_note}}
+                     "backdrop": bool(backdrop), "backdrop_prompt": backdrop_note,
+                     "backdrop_credit": backdrop_credit}}
 
 
 # -------------------------------------------------------------- 4. audio ---
@@ -682,10 +689,28 @@ def run_package(job: Job, store: JobStore, progress: Progress | None = None) -> 
         "integrated_lufs": (report.get("loudness") or {}).get("integrated_lufs"),
         "width": video.get("width"), "height": video.get("height"),
     }
+    # Who to credit for the pictures. The content stage wrote captions.txt and
+    # metadata/ long before the visuals stage knew which photographs it would
+    # find, so both are re-emitted here with the attribution the licence asks
+    # for. A reel that used no stock footage gets an empty credit and output
+    # identical to what it was.
+    from app.stages import visuals as V
+
+    cover_meta = (job.state(Stage.COVER).meta or {}).get("backdrop_credit") or {}
+    credits = V.credits_from(V.read_assets(paths.visuals_json), cover_meta)
+    credit = V.credit_line(credits)
+
     atomic_write(paths.notes_md,
-                 documents.notes_md(content, platforms, spec=spec, facts=facts))
+                 documents.notes_md(content, platforms, spec=spec, facts=facts,
+                                    credits=credits))
 
     paths.out.mkdir(parents=True, exist_ok=True)
+    if credit:
+        atomic_write(paths.out / "captions.txt",
+                     documents.caption_block(content, platforms, credit=credit))
+        paths.metadata.mkdir(parents=True, exist_ok=True)
+        for name, body in documents.metadata_files(content, platforms, credit=credit).items():
+            atomic_write(paths.metadata / name, body)
     for source, name in ((paths.reel_mp4, f"{job.slug}-reel.mp4"),
                          (paths.cover_png, f"{job.slug}-reel.png"),
                          (paths.facts_json, "facts.json"),

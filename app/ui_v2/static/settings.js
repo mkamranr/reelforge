@@ -12,8 +12,8 @@
   /* Each profile carries its own `fields` schema -- key, label, type, help --
    * so the form is generated from what the adapter actually accepts rather than
    * a hardcoded case per adapter. A new adapter gets an editor for free. */
-  var KIND_TITLES = { llm: "Language models", tts: "Voices", visuals: "Generated visuals" };
-  var KIND_NOUNS = { llm: "model", tts: "voice", visuals: "image generator" };
+  var KIND_TITLES = { llm: "Language models", tts: "Voices", visuals: "Pictures" };
+  var KIND_NOUNS = { llm: "model", tts: "voice", visuals: "picture source" };
 
   function editProfile(kind, profile, adapters) {
     var isNew = !profile;
@@ -475,7 +475,7 @@
                                       placeholder: "empty keeps the workflow's own" });
 
     return el("div", { class: "card stack", "data-gap": "3" },
-      el("div", { class: "card__title" }, "Generated visuals: how much, and the look"),
+      el("div", { class: "card__title" }, "Pictures: how many, and the look"),
       el("div", { class: "field__hint" },
          enabled
            ? "Active profile: " + block.active + ". Each reel gets stills from its " +

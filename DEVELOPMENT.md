@@ -70,10 +70,10 @@ URL, and it fetches the facts, writes the script and per-platform copy, generate
 or accepts narration, aligns it, writes the storyboard, renders, verifies and
 packages. Two web UIs and a CLI:
 
-- `http://localhost:8000/v2` — the current one. Separate pages, no build step,
+- `http://localhost:8020/v2` — the current one. Separate pages, no build step,
   no CDN. Add a page by dropping an `.html` into `app/ui_v2/` and a matching
   `static/<page>.js`; `tests/test_ui_v2.py` picks it up automatically.
-- `http://localhost:8000/` — the original single-file SPA. **Frozen**: it is the
+- `http://localhost:8020/` — the original single-file SPA. **Frozen**: it is the
   escape hatch while v2 settles, and sharing code with it would couple the thing
   being replaced to its replacement.
 - `python -m app.cli`
@@ -82,7 +82,7 @@ packages. Two web UIs and a CLI:
 docker compose -f docker/docker-compose.yml up --build   # api + worker + renderer + redis
 python -m app.cli doctor                                 # check the environment
 python -m app.cli new https://github.com/o/r --run
-uvicorn app.main:app --workers 1                         # one worker; see the queue
+uvicorn app.main:app --workers 1 --port 8020            # one worker; see the queue
 ```
 
 ### One reel at a time
@@ -268,8 +268,9 @@ a still, illegible in the render.
 
 ## Generated clips and stills
 
-`app/stages/visuals.py` asks a ComfyUI server (`app/providers/visuals/`) for
-pictures and delivers them the only way this renderer can use them: a still is
+`app/stages/visuals.py` asks a picture backend (`app/providers/visuals/`) —
+a ComfyUI server that draws them, or Pexels, which searches for them — and
+delivers them the only way this renderer can use them: a still is
 a prepared PNG beside the uploaded screenshots, a clip is a directory of JPEG
 frames at 1080x1920 / 30 fps under `<job>/video/images/clip-<n>/`. The emitted
 storyboards gain a `clip` slot (`sl_clip` in all three families) that pastes
@@ -285,6 +286,19 @@ dark clip under the scrims trips the **sparse** rung, so every clip screen
 also carries its scene title as text. The Slab family already trips safe-area
 with the test fixture's light palette, clip or no clip; that is a pre-existing
 condition the visuals tests compare against rather than hide.
+
+The one thing a searching backend needs that a generating one does not is a
+**search term**. A diffusion prompt is 25-45 words of cinematic description
+and matches nothing in a stock library, so `query` travels beside `prompt`
+all the way from the art director (a fourth field next to `still`, `clip` and
+`heading`) to `VisualsProvider.still` / `.clip`. ComfyUI ignores it. Without
+an art director, `search_query()` cuts the shot description down to three
+nouns by rule, because a picture with no term at all is a hole in the reel.
+The seed then picks among the search results rather than seeding a sampler,
+which keeps the stage's reuse check honest: same prompt and seed, same
+photograph, no second fetch. Note that a stock clip is whatever the
+photographer shot — often half a minute — so `extract_frames` trims with
+`-ss`/`-t` rather than exploding all of it.
 
 Audio goes in through `shim_sfx.py` the same way, from `app/render/soundbed.py`:
 `sfx.make_gens` is replaced on the loaded module so generated one-shots stand

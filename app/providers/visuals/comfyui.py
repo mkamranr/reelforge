@@ -6,14 +6,15 @@ produced file. Progress is available over a websocket, but polling /history
 every couple of seconds is enough for something that takes minutes and needs
 no per-step feedback.
 
-A clip comes back as an mp4 and is turned into frames here with ffmpeg,
-scaled to the reel's frame and resampled to its frame rate, so the storyboard
-pastes frame `int((t - t0) * FPS)` and never decodes video.
+A clip comes back as an mp4 and is turned into frames with ffmpeg, scaled to
+the reel's frame and resampled to its frame rate, so the storyboard pastes
+frame `int((t - t0) * FPS)` and never decodes video. That conversion, and the
+one to the mixer's wav, live in `media.py` and are re-exported here: they were
+this module's own until a second adapter needed them.
 """
 from __future__ import annotations
 
 import json
-import subprocess
 import time
 import uuid
 from pathlib import Path
@@ -23,6 +24,7 @@ import httpx
 
 from app.providers.visuals import workflow as wf
 from app.providers.visuals.base import AudioResult, ClipResult, StillResult, VisualsError, VisualsProvider
+from app.providers.visuals.media import extract_frames, to_wav48
 
 PROBE_TIMEOUT = 5.0
 POLL_SECONDS = 2.0
@@ -158,7 +160,8 @@ class ComfyUIProvider(VisualsProvider):
 
     # ------------------------------------------------------- generation ---
     def still(self, prompt: str, out: Path, *, width: int, height: int,
-              seed: int, negative: str = "", progress=None) -> StillResult:
+              seed: int, negative: str = "", query: str = "",
+              progress=None) -> StillResult:
         if not self.image_workflow:
             raise VisualsError("no image workflow configured on this profile")
         nodes = wf.load(_repo_path(self.image_workflow))
@@ -185,7 +188,8 @@ class ComfyUIProvider(VisualsProvider):
                            meta={"prompt_id": prompt_id, "file": files[0]["filename"]})
 
     def clip(self, prompt: str, out_dir: Path, *, seconds: float, fps: int,
-             width: int, height: int, seed: int, negative: str = "", progress=None) -> ClipResult:
+             width: int, height: int, seed: int, negative: str = "", query: str = "",
+             progress=None) -> ClipResult:
         if not self.video_workflow:
             raise VisualsError("no video workflow configured on this profile")
         nodes = wf.load(_repo_path(self.video_workflow))
@@ -331,46 +335,3 @@ def _status_message(status: dict[str, Any]) -> str:
             detail = message[1] or {}
             return f"{detail.get('node_type', '?')}: {detail.get('exception_message', '')}"[:300]
     return status.get("status_str", "error")
-
-
-def to_wav48(source: Path, out: Path) -> float:
-    """Whatever the Save node wrote -> 48 kHz stereo 16-bit wav, the mixer's
-    own format. Returns the length in seconds."""
-    from app.render.workspace import ffmpeg_bin
-
-    out.parent.mkdir(parents=True, exist_ok=True)
-    if source.resolve() == out.resolve():
-        raise VisualsError("audio source and target are the same file")
-    cmd = [ffmpeg_bin(), "-y", "-v", "error", "-i", str(source), "-ac", "2", "-ar", "48000",
-           "-c:a", "pcm_s16le", str(out)]
-    proc = subprocess.run(cmd, capture_output=True, text=True)
-    if proc.returncode != 0:
-        raise VisualsError("audio conversion failed: " + proc.stderr.strip()[-400:])
-    import wave
-
-    with wave.open(str(out)) as w:
-        return w.getnframes() / float(w.getframerate())
-
-
-def extract_frames(source: Path, out_dir: Path, *, fps: int, width: int, height: int) -> int:
-    """mp4 -> out_dir/00001.jpg ... at the reel's size and frame rate.
-
-    Scale to cover then centre-crop, so a 9:16 clip fills the frame exactly
-    and anything else loses its edges rather than letterboxing.
-    """
-    from app.render.workspace import ffmpeg_bin
-
-    out_dir.mkdir(parents=True, exist_ok=True)
-    for old in out_dir.glob("*.jpg"):
-        old.unlink()
-    filters = (f"fps={fps},scale={width}:{height}:force_original_aspect_ratio=increase,"
-               f"crop={width}:{height}")
-    cmd = [ffmpeg_bin(), "-y", "-v", "error", "-i", str(source), "-vf", filters,
-           "-q:v", "3", str(out_dir / "%05d.jpg")]
-    proc = subprocess.run(cmd, capture_output=True, text=True)
-    if proc.returncode != 0:
-        raise VisualsError("frame extraction failed: " + proc.stderr.strip()[-400:])
-    count = len(list(out_dir.glob("*.jpg")))
-    if count == 0:
-        raise VisualsError("frame extraction produced no frames")
-    return count
