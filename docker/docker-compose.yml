@@ -16,6 +16,22 @@ x-common: &common
   # v2.24+, and Docker 24 ships an older one. So `.env` must exist -- run
   # `cp .env.example .env` first, as the README says. It may be left empty.
   env_file: [../.env]
+  # Who the container is, as far as the host filesystem is concerned.
+  #
+  # `../data` is a bind mount, and a bind mount keeps the HOST directory's
+  # ownership -- the `chown` the Dockerfile does to /app/data is replaced
+  # along with the directory. Docker Desktop papers over this by mapping
+  # ownership for any container uid, which is why it has always worked on a
+  # Mac; on Linux the numbers are real and the image's uid 10001 cannot write
+  # to a directory owned by you, so the API dies on its first mkdir:
+  #
+  #     PermissionError: [Errno 13] Permission denied: '/app/data/jobs'
+  #
+  # Set these to your own ids on Linux (`id -u`, `id -g`) and the reels come
+  # out owned by you -- data/jobs/<id>/ stays a plain directory you can open,
+  # back up and delete without sudo. The default is the image's own user, so
+  # nothing changes where it already worked.
+  user: "${REELFORGE_UID:-10001}:${REELFORGE_GID:-10001}"
   environment:
     REELFORGE_EXECUTOR: celery
     REELFORGE_QUEUE__BROKER_URL: redis://redis:6379/0

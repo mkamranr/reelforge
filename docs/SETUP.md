@@ -87,6 +87,35 @@ Four services come up: `api`, `worker`, `renderer` and `redis`. Open
 Compose publishes on `127.0.0.1` deliberately — the settings API accepts API
 keys. See *Securing the settings API*.
 
+#### On Linux, set the user first
+
+`./data` is bind-mounted into the containers, and a bind mount keeps the **host
+directory's** ownership — whatever the image did to `/app/data` at build time
+is replaced along with the directory. Docker Desktop maps ownership for any
+container uid, so this never shows up on a Mac. On Linux the numbers are real,
+and the API exits on its first write:
+
+```
+PermissionError: [Errno 13] Permission denied: '/app/data/jobs'
+```
+
+Tell compose to run the containers as you:
+
+```bash
+printf 'REELFORGE_UID=%s\nREELFORGE_GID=%s\n' "$(id -u)" "$(id -g)" \
+  > docker/.env
+```
+
+**`docker/.env`, not the root `.env`.** Compose interpolates `${...}` in the
+compose file from the env file beside it; the root `.env` is what gets passed
+*into* the containers. A value in the wrong one is ignored without a word.
+`docker/.env.example` documents it.
+
+Reels then land in `data/jobs/<id>/` owned by you, which is the point of
+keeping it a plain directory. The quick alternative — `sudo chown -R
+10001:10001 data` — also works, but you need `sudo` to delete a job
+afterwards.
+
 ### Fully local, no keys
 
 Two optional profiles add a local model server and a local voice:
