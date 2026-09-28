@@ -216,8 +216,50 @@ The settings API accepts API keys, so it is guarded:
 | **loopback** (default) | `REELFORGE_ADMIN_TOKEN` empty | This machine only |
 | **token** | `REELFORGE_ADMIN_TOKEN` set | Any host presenting that bearer token |
 
-Compose binds to `127.0.0.1` to match the default. If you publish the port
-beyond localhost, set the token first.
+Two things about the token mode that are easy to get wrong.
+
+**It applies to everyone, including you.** The check tests the token before it
+tests where the request came from, so once a token is set even a browser on
+the machine itself must send it. The Settings page asks for it and keeps it in
+that browser's local storage; paste it once per browser. An empty or
+whitespace value counts as unset.
+
+**Put it in the root `.env`,** which is passed into the containers — not
+`docker/.env`, which is only for the variables compose interpolates into the
+compose file (`REELFORGE_BIND`, `REELFORGE_UID`, `REELFORGE_GID`). Check it
+arrived rather than assuming:
+
+```bash
+docker compose -f docker/docker-compose.yml exec api printenv REELFORGE_ADMIN_TOKEN
+```
+
+### What the token does not cover
+
+Only `/api/settings` is guarded. Publishing the port also exposes, with no
+authentication at all:
+
+- `/api/jobs/*` — create, run, cancel, and `GET /api/jobs/{id}/artifacts/{path}`,
+  which reads any file in a job directory
+- `/api/queue/*` — pause, resume, reorder
+- `POST /api/config/tts/key` — pins which ElevenLabs key is used
+- `GET /api/config/providers` — reports remaining **key balances**
+
+CORS is `allow_origins=["*"]`, so any page someone on that network opens can
+call those too. Treat a published ReelForge as trusted-network-only.
+
+## Publishing the port
+
+Compose binds to `127.0.0.1` by default. To reach it from elsewhere, set
+`REELFORGE_BIND` in `docker/.env`:
+
+```bash
+echo 'REELFORGE_BIND=0.0.0.0' >> docker/.env       # every interface
+echo 'REELFORGE_BIND=100.101.102.103' >> docker/.env   # one address only
+```
+
+Naming a single address — the host's own Tailscale address, say — is tighter
+than `0.0.0.0` and does not depend on a firewall being right. Read *What the
+token does not cover* first either way.
 
 ---
 

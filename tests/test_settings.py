@@ -227,6 +227,69 @@ def test_a_wrong_token_is_refused(monkeypatch):
     assert raised.value.status_code == 401
 
 
+def test_a_token_locks_out_the_local_browser_too(monkeypatch):
+    """The reason the UI needed somewhere to keep a token.
+
+    `require_admin` tests the token branch before it tests the peer, so
+    turning REELFORGE_ADMIN_TOKEN on does not merely *allow* remote
+    administration -- it *requires* the header from everyone, including a
+    browser on the machine itself. Before the UI could send one, setting the
+    token silently broke the Settings page everywhere.
+    """
+    from fastapi import HTTPException
+
+    from app.api.auth import require_admin
+
+    monkeypatch.setenv("REELFORGE_ADMIN_TOKEN", "letmein")
+
+    class LocalNoHeader:
+        client = type("C", (), {"host": "127.0.0.1"})()
+        headers: dict = {}
+
+    with pytest.raises(HTTPException) as raised:
+        require_admin(LocalNoHeader())
+    assert raised.value.status_code == 401
+    assert "REELFORGE_ADMIN_TOKEN" in raised.value.detail
+
+
+def test_an_empty_token_is_no_token_at_all(monkeypatch):
+    """Whitespace or empty reads as unset, which is why a compose default of
+    `${REELFORGE_ADMIN_TOKEN:-}` silently disabled authentication for anyone
+    who set the token in the repository root .env and published the port."""
+    from app.api.auth import access_mode, admin_token, require_admin
+
+    for value in ("", "   "):
+        monkeypatch.setenv("REELFORGE_ADMIN_TOKEN", value)
+        assert admin_token() is None
+        assert access_mode()["mode"] == "loopback"
+
+        class Remote:
+            client = type("C", (), {"host": "100.64.0.9"})()
+            headers: dict = {}
+
+        from fastapi import HTTPException
+
+        # loopback mode: a tailnet peer is refused, not waved through
+        with pytest.raises(HTTPException) as raised:
+            require_admin(Remote())
+        assert raised.value.status_code == 403
+
+
+def test_the_ui_sends_the_token_on_both_request_paths():
+    """`upload` is a separate XHR path from `request`; a header added to one
+    and not the other means screenshots 401 while everything else works."""
+    from pathlib import Path
+
+    source = (Path(__file__).parent.parent / "app" / "ui_v2" / "static" / "api.js").read_text()
+
+    assert "localStorage" in source and "reelforge.admin_token" in source
+    assert source.count('"Bearer "') >= 2, "fetch and XHR each need the header"
+    assert "setRequestHeader" in source, "the XHR upload path has no token"
+    # EventSource cannot carry a header; the comment is the guard against
+    # someone guarding /api/jobs without noticing
+    assert "EventSource has no headers API" in source
+
+
 # ------------------------------------------- keys reach the providers -----
 def test_a_key_saved_in_the_ui_reaches_the_provider(client, monkeypatch):
     """The bug this covers: the key was stored correctly and reported as set,

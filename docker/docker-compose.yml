@@ -36,8 +36,6 @@ x-common: &common
     REELFORGE_EXECUTOR: celery
     REELFORGE_QUEUE__BROKER_URL: redis://redis:6379/0
     REELFORGE_QUEUE__RESULT_BACKEND: redis://redis:6379/1
-    # required for remote administration; unset means loopback-only settings
-    REELFORGE_ADMIN_TOKEN: ${REELFORGE_ADMIN_TOKEN:-}
   volumes:
     # the original pipeline, never written to
     - ../video:/app/video:ro
@@ -64,10 +62,14 @@ services:
     build:
       context: ..
       dockerfile: docker/Dockerfile.app
-    # Loopback only. The settings API accepts API keys, and without
-    # REELFORGE_ADMIN_TOKEN set it trusts anything that can reach it. Publish
-    # more widely only together with that token.
-    ports: ["127.0.0.1:8020:8020"]
+    # Loopback by default, because only /api/settings is guarded: publishing
+    # this port also exposes jobs, the queue, artifact download and the
+    # provider key balances to anything that can route to the box. Set
+    # REELFORGE_BIND in docker/.env to widen it -- 0.0.0.0 for every
+    # interface, or a single address (a Tailscale 100.x, say) to reach it
+    # from one network and no other. Set REELFORGE_ADMIN_TOKEN in ../.env at
+    # the same time; see docs/SETUP.md.
+    ports: ["${REELFORGE_BIND:-127.0.0.1}:8020:8020"]
 
   # Short stages: ingest, content, audio, align, package. Kept off the render
   # queue so an eight-minute encode never blocks a thirty-second LLM call.

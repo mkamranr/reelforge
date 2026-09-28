@@ -515,5 +515,16 @@ The settings API accepts API keys, so it is guarded:
 | **loopback** *(default)* | `REELFORGE_ADMIN_TOKEN` empty | This machine only |
 | **token** | `REELFORGE_ADMIN_TOKEN` set | Any host presenting that bearer token |
 
-Compose binds to `127.0.0.1` to match the default. Set the token before
-publishing the port beyond localhost.
+The token applies to **everyone** once set, including a browser on the machine
+itself — the check tests the token before it tests the peer address. The
+Settings page asks for it and keeps it in that browser's local storage. Empty
+or whitespace counts as unset.
+
+It goes in the root `.env` (passed into the containers), not `docker/.env`
+(compose's own variables). And it guards `/api/settings` only: jobs, the
+queue, artifact download and the provider key balances stay open to anyone who
+can reach the port.
+
+Compose binds to `127.0.0.1` by default; `REELFORGE_BIND` in `docker/.env`
+widens it. See **[SETUP.md](SETUP.md)** — *Securing the settings API* and
+*Publishing the port*.

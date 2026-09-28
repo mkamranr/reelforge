@@ -16,6 +16,37 @@
 (function (RF) {
   "use strict";
 
+  /* ---------------------------------------------------------------- token
+   * The admin token, for a ReelForge published beyond localhost.
+   *
+   * `require_admin` checks the token before it checks the peer address, so
+   * once REELFORGE_ADMIN_TOKEN is set on the server *every* client needs the
+   * header -- including a browser on the machine itself. Without somewhere to
+   * keep one, turning the token on simply broke the Settings page.
+   *
+   * It lives in localStorage and nowhere else: it is a credential for this
+   * browser, not configuration, and it is never posted back to the server as
+   * a setting.
+   */
+  var TOKEN_KEY = "reelforge.admin_token";
+
+  function getToken() {
+    try { return window.localStorage.getItem(TOKEN_KEY) || ""; } catch (err) { return ""; }
+  }
+
+  function setToken(value) {
+    try {
+      if (value) window.localStorage.setItem(TOKEN_KEY, value);
+      else window.localStorage.removeItem(TOKEN_KEY);
+    } catch (err) { /* private mode: the token just does not persist */ }
+  }
+
+  function authorise(headers) {
+    var token = getToken();
+    if (token) headers.authorization = "Bearer " + token;
+    return headers;
+  }
+
   function ApiError(status, detail, path) {
     var error = new Error(humanise(detail) || ("HTTP " + status));
     error.name = "ApiError";
@@ -44,7 +75,7 @@
     options = options || {};
     var init = {
       method: options.method || "GET",
-      headers: Object.assign({}, options.headers),
+      headers: authorise(Object.assign({}, options.headers)),
       signal: options.signal,
     };
     if (options.body !== undefined) {
@@ -78,6 +109,9 @@
     return new Promise(function (resolve, reject) {
       var xhr = new XMLHttpRequest();
       xhr.open("POST", path);
+      // a separate code path from `request`, so it needs the header of its own
+      var token = getToken();
+      if (token) xhr.setRequestHeader("authorization", "Bearer " + token);
       if (options.onProgress && xhr.upload) {
         xhr.upload.onprogress = function (event) {
           if (event.lengthComputable) options.onProgress(event.loaded / event.total);
@@ -96,6 +130,10 @@
   }
 
   /* ------------------------------------------------------------------- SSE */
+  /* No token here, and it cannot have one: EventSource has no headers API.
+   * This works because /api/jobs is unguarded -- only /api/settings requires
+   * the token. Anyone putting `require_admin` on the jobs router has to solve
+   * live progress first, or the reel page goes quiet with no error. */
   function events(jobId, handlers) {
     handlers = handlers || {};
     var source = new EventSource("/api/jobs/" + encodeURIComponent(jobId) + "/events");
@@ -166,5 +204,6 @@
     del: function (p, o) { return request(p, Object.assign({ method: "DELETE" }, o)); },
     text: function (p, o) { return request(p, Object.assign({ expect: "text" }, o)); },
     upload: upload, events: events, poll: poll, group: group,
+    getToken: getToken, setToken: setToken,
   };
 })(window.RF || (window.RF = {}));

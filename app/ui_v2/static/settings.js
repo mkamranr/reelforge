@@ -428,6 +428,46 @@
   /* How much generated imagery a reel gets. A separate card from the profile
    * list because these are not properties of a server: two stills and a clip
    * is a decision about the reel, whichever box draws them. */
+  /* The admin token, for a ReelForge published beyond localhost.
+   *
+   * This card has to work when the rest of the page could not load: the token
+   * is what unlocks GET /api/settings, so on a 401 it is the only thing
+   * rendered. Hence `access` takes no arguments and never reads `settings`.
+   */
+  function accessCard(note) {
+    var input = el("input", { class: "input", type: "password",
+                              autocomplete: "off", placeholder: "paste the admin token",
+                              value: RF.api.getToken() ? "................" : "" });
+    var save = el("button", { class: "btn btn--primary btn--sm", type: "button" }, "Save");
+    var forget = el("button", { class: "btn btn--sm", type: "button" }, "Forget");
+
+    save.addEventListener("click", function () {
+      var value = input.value.trim();
+      if (!value || value === "................") {
+        RF.dom.toast("paste the token first", { kind: "error" });
+        return;
+      }
+      RF.api.setToken(value);
+      RF.dom.toast("token saved in this browser", { kind: "ok" });
+      load();
+    });
+    forget.addEventListener("click", function () {
+      RF.api.setToken("");
+      RF.dom.toast("token forgotten", { kind: "ok" });
+      load();
+    });
+
+    return el("div", { class: "card" },
+      el("div", { class: "card__title" }, "Access"),
+      el("div", { class: "field__hint" },
+         note || ("This ReelForge is reachable beyond its own machine, so the "
+                  + "settings API asks for the admin token -- the value of "
+                  + "REELFORGE_ADMIN_TOKEN on the server. It is kept in this "
+                  + "browser only and is never saved as a setting.")),
+      el("div", { class: "cluster", "data-gap": "2" }, input, save,
+         RF.api.getToken() ? forget : null));
+  }
+
   function visualsCard(settings) {
     var block = settings.visuals || {};
     var options = block.options || {};
@@ -671,20 +711,37 @@
         ttsKeyCard(settings),
         gatesCard(settings),
         secretsCard(secrets),
+        (settings.access || {}).mode === "token" ? accessCard() : null,
       ].filter(Boolean));
     }).catch(function (error) {
-      var body = error.status === 403
-        ? el("div", { class: "callout callout--info" },
-            el("div", null,
-              el("div", { class: "callout__title" }, "Settings are local-only"),
-              el("div", null, "These controls answer only to a request from the " +
-                 "machine ReelForge runs on, or one carrying the admin token. " +
-                 "That is deliberate: they hold API keys.")))
-        : el("div", { class: "callout callout--error" },
-            el("div", null,
-              el("div", { class: "callout__title" }, "Settings could not be loaded"),
-              el("div", null, error.message)));
-      RF.dom.mount(host, [el("h1", { class: "section__title" }, "Settings"), body]);
+      // 401 means the server wants the token and this browser has none, or a
+      // stale one. That is recoverable from here, so offer the box rather
+      // than an error -- the token is what would have let the page load.
+      var body = error.status === 401
+        ? [el("div", { class: "callout callout--info" },
+              el("div", null,
+                el("div", { class: "callout__title" }, "This ReelForge asks for an admin token"),
+                el("div", null, RF.api.getToken()
+                   ? "The token saved in this browser was not accepted. Paste "
+                     + "the current one below."
+                   : "It is published beyond its own machine, so the settings "
+                     + "API -- which holds the API keys -- requires the token."))),
+           accessCard(RF.api.getToken()
+             ? "The saved token was rejected. Paste the value of "
+               + "REELFORGE_ADMIN_TOKEN from the server."
+             : null)]
+        : error.status === 403
+        ? [el("div", { class: "callout callout--info" },
+              el("div", null,
+                el("div", { class: "callout__title" }, "Settings are local-only"),
+                el("div", null, "These controls answer only to a request from the " +
+                   "machine ReelForge runs on, or one carrying the admin token. " +
+                   "That is deliberate: they hold API keys.")))]
+        : [el("div", { class: "callout callout--error" },
+              el("div", null,
+                el("div", { class: "callout__title" }, "Settings could not be loaded"),
+                el("div", null, error.message)))];
+      RF.dom.mount(host, [el("h1", { class: "section__title" }, "Settings")].concat(body));
     });
   }
 
