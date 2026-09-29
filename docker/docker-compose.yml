@@ -1,6 +1,6 @@
 # ReelForge on one machine.
 #
-#   docker compose -f docker/docker-compose.yml up --build
+#   docker compose --env-file .env -f docker/docker-compose.yml up --build
 #
 # Optional extras, off unless asked for:
 #   --profile local-llm   an Ollama container for fully local generation
@@ -55,10 +55,13 @@ services:
     # Loopback by default, because only /api/settings is guarded: publishing
     # this port also exposes jobs, the queue, artifact download and the
     # provider key balances to anything that can route to the box. Set
-    # REELFORGE_BIND in docker/.env to widen it -- 0.0.0.0 for every
-    # interface, or a single address (a Tailscale 100.x, say) to reach it
-    # from one network and no other. Set REELFORGE_ADMIN_TOKEN in ../.env at
-    # the same time; see docs/SETUP.md.
+    # REELFORGE_BIND in ../.env to widen it -- 0.0.0.0 for every interface,
+    # or a single address (a Tailscale 100.x, say) to reach it from one
+    # network and no other. Set REELFORGE_ADMIN_TOKEN at the same time.
+    #
+    # This interpolates from ../.env ONLY because the documented command
+    # passes `--env-file .env`. Compose otherwise reads the env file beside
+    # this one, and the setting goes quietly nowhere.
     ports: ["${REELFORGE_BIND:-127.0.0.1}:8020:8020"]
 
   # Short stages: ingest, content, audio, align, package. Kept off the render

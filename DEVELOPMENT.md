@@ -79,7 +79,7 @@ packages. Two web UIs and a CLI:
 - `python -m app.cli`
 
 ```bash
-docker compose -f docker/docker-compose.yml up --build   # api + worker + renderer + redis
+docker compose --env-file .env -f docker/docker-compose.yml up --build   # api + worker + renderer + redis
 python -m app.cli doctor                                 # check the environment
 python -m app.cli new https://github.com/o/r --run
 uvicorn app.main:app --workers 1 --port 8020            # one worker; see the queue

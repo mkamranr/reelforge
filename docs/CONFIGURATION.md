@@ -330,7 +330,7 @@ tts:
 | | port | voices | how |
 |---|---|---|---|
 | [Kokoro-TTS-OpenAPI](https://github.com/mkamranr/Kokoro-TTS-OpenAPI) | 8080 | 28 English, graded | `./scripts/setup_mac.sh` then `python -m app` — CPU-native on macOS, no container |
-| [Kokoro-FastAPI](https://github.com/remsky/Kokoro-FastAPI) | 8880 | more, multilingual | `docker compose -f docker/docker-compose.yml --profile local-tts up -d tts` |
+| [Kokoro-FastAPI](https://github.com/remsky/Kokoro-FastAPI) | 8880 | more, multilingual | `docker compose --env-file .env -f docker/docker-compose.yml --profile local-tts up -d tts` |
 
 Synthesis is identical on both — `POST /v1/audio/speech`, OpenAI-shaped. They
 differ only in where the voice list lives (`/voices` and `/v1/audio/voices`
@@ -520,11 +520,9 @@ itself — the check tests the token before it tests the peer address. The
 Settings page asks for it and keeps it in that browser's local storage. Empty
 or whitespace counts as unset.
 
-It goes in the root `.env` (passed into the containers), not `docker/.env`
-(compose's own variables). And it guards `/api/settings` only: jobs, the
-queue, artifact download and the provider key balances stay open to anyone who
-can reach the port.
+It guards `/api/settings` only: jobs, the queue, artifact download and the
+provider key balances stay open to anyone who can reach the port.
 
-Compose binds to `127.0.0.1` by default; `REELFORGE_BIND` in `docker/.env`
-widens it. See **[SETUP.md](SETUP.md)** — *Securing the settings API* and
+Compose binds to `127.0.0.1` by default; `REELFORGE_BIND` in `.env` widens
+it. See **[SETUP.md](SETUP.md)** — *Securing the settings API* and
 *Publishing the port*.

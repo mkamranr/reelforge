@@ -78,7 +78,7 @@ owner-only permissions (`0600`) instead. They are never returned by any endpoint
 ## 4a. Run with Docker
 
 ```bash
-docker compose -f docker/docker-compose.yml up --build
+docker compose --env-file .env -f docker/docker-compose.yml up --build
 ```
 
 Four services come up: `api`, `worker`, `renderer` and `redis`. Open
@@ -114,11 +114,11 @@ the root `.env`.
 Two optional profiles add a local model server and a local voice:
 
 ```bash
-docker compose -f docker/docker-compose.yml \
+docker compose --env-file .env -f docker/docker-compose.yml \
   --profile local-llm --profile local-tts up --build
 
 # pull a model once the ollama service is up
-docker compose -f docker/docker-compose.yml exec ollama ollama pull qwen2.5:7b-instruct
+docker compose --env-file .env -f docker/docker-compose.yml exec ollama ollama pull qwen2.5:7b-instruct
 ```
 
 | Profile | Service | What it gives you |
@@ -217,13 +217,12 @@ the machine itself must send it. The Settings page asks for it and keeps it in
 that browser's local storage; paste it once per browser. An empty or
 whitespace value counts as unset.
 
-**Put it in the root `.env`,** which is passed into the containers — not
-`docker/.env`, which is only for the variables compose interpolates into the
-compose file (`REELFORGE_BIND`, `REELFORGE_UID`, `REELFORGE_GID`). Check it
-arrived rather than assuming:
+**Check it arrived** rather than assuming — everything lives in the root
+`.env`, but a token that never reached the container looks exactly like one
+that did:
 
 ```bash
-docker compose -f docker/docker-compose.yml exec api printenv REELFORGE_ADMIN_TOKEN
+docker compose --env-file .env -f docker/docker-compose.yml exec api printenv REELFORGE_ADMIN_TOKEN
 ```
 
 ### What the token does not cover
@@ -243,12 +242,16 @@ call those too. Treat a published ReelForge as trusted-network-only.
 ## Publishing the port
 
 Compose binds to `127.0.0.1` by default. To reach it from elsewhere, set
-`REELFORGE_BIND` in `docker/.env`:
+`REELFORGE_BIND` in `.env`:
 
 ```bash
-echo 'REELFORGE_BIND=0.0.0.0' >> docker/.env       # every interface
-echo 'REELFORGE_BIND=100.101.102.103' >> docker/.env   # one address only
+echo 'REELFORGE_BIND=0.0.0.0' >> .env              # every interface
+echo 'REELFORGE_BIND=100.101.102.103' >> .env      # one address only
 ```
+
+Then recreate: `docker compose --env-file .env -f docker/docker-compose.yml up -d`.
+Check it took with `docker ps` — the port column should read
+`0.0.0.0:8020->8020/tcp`, not `127.0.0.1:8020->8020/tcp`.
 
 Naming a single address — the host's own Tailscale address, say — is tighter
 than `0.0.0.0` and does not depend on a firewall being right. Read *What the

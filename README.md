@@ -89,16 +89,16 @@ The retention rules are baked into the storyboards, not left to chance:
 ```bash
 git clone <your-repo-url> reelforge && cd reelforge
 cp .env.example .env                                    # fill in only what you use
-docker compose -f docker/docker-compose.yml up --build
+docker compose --env-file .env -f docker/docker-compose.yml up --build
 open http://localhost:8020/v2
 ```
 
 Fully local, no API keys at all:
 
 ```bash
-docker compose -f docker/docker-compose.yml \
+docker compose --env-file .env -f docker/docker-compose.yml \
   --profile local-llm --profile local-tts up --build
-docker compose -f docker/docker-compose.yml exec ollama ollama pull qwen2.5:7b-instruct
+docker compose --env-file .env -f docker/docker-compose.yml exec ollama ollama pull qwen2.5:7b-instruct
 ```
 
 Without Docker, for development — no Redis needed, stages run inline:
