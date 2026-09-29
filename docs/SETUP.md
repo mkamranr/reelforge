@@ -87,34 +87,27 @@ Four services come up: `api`, `worker`, `renderer` and `redis`. Open
 Compose publishes on `127.0.0.1` deliberately — the settings API accepts API
 keys. See *Securing the settings API*.
 
-#### On Linux, set the user first
+#### Permissions: nothing to do
 
-`./data` is bind-mounted into the containers, and a bind mount keeps the **host
-directory's** ownership — whatever the image did to `/app/data` at build time
-is replaced along with the directory. Docker Desktop maps ownership for any
-container uid, so this never shows up on a Mac. On Linux the numbers are real,
-and the API exits on its first write:
+`./data` is bind-mounted, and a bind mount keeps the **host directory's**
+ownership — whatever the image did to `/app/data` at build time is replaced
+along with the directory. That used to mean the container could not write
+there on Linux, and the API died on its first mkdir:
 
 ```
 PermissionError: [Errno 13] Permission denied: '/app/data/jobs'
 ```
 
-Tell compose to run the containers as you:
+The images handle it themselves now. The entrypoint starts as root, takes
+`/app/data`'s ownership from whoever owns it on the host, and drops
+privileges before running anything — so reels come out belonging to you and
+`data/jobs/<id>/` stays a directory you can open, back up and delete without
+`sudo`. If the directory does not exist at all and Docker creates it as root,
+the containers fall back to their own unprivileged user rather than running
+as root.
 
-```bash
-printf 'REELFORGE_UID=%s\nREELFORGE_GID=%s\n' "$(id -u)" "$(id -g)" \
-  > docker/.env
-```
-
-**`docker/.env`, not the root `.env`.** Compose interpolates `${...}` in the
-compose file from the env file beside it; the root `.env` is what gets passed
-*into* the containers. A value in the wrong one is ignored without a word.
-`docker/.env.example` documents it.
-
-Reels then land in `data/jobs/<id>/` owned by you, which is the point of
-keeping it a plain directory. The quick alternative — `sudo chown -R
-10001:10001 data` — also works, but you need `sudo` to delete a job
-afterwards.
+To force a specific user instead, set `REELFORGE_UID` and `REELFORGE_GID` in
+the root `.env`.
 
 ### Fully local, no keys
 

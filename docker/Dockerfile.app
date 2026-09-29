@@ -26,7 +26,17 @@ COPY video/ ./video/
 
 RUN useradd --create-home --uid 10001 reelforge \
     && mkdir -p /app/data/jobs && chown -R reelforge:reelforge /app/data
-USER reelforge
+
+# Not `USER reelforge`: the entrypoint starts as root, makes the bind-mounted
+# /app/data writable, and drops privileges itself. A bind mount replaces the
+# directory this image just chowned, so the build-time ownership above only
+# helps when /app/data is NOT mounted over -- which is the standalone case.
+COPY docker/entrypoint.sh /entrypoint.sh
+# chmod here rather than trusting the checkout: a clone on a filesystem
+# that drops the executable bit would fail at start with "permission denied"
+# and nothing else to go on.
+RUN chmod 0755 /entrypoint.sh
+ENTRYPOINT ["/entrypoint.sh"]
 
 EXPOSE 8020
 HEALTHCHECK --interval=30s --timeout=5s --start-period=20s \
